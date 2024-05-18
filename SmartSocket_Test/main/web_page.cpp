@@ -375,7 +375,7 @@ function selectDevice()
 
 const char message[] = R"rawliteral(
   {"objectId":"%d",
-  "deviceid": "%d",
+  "deviceid": "%l",
   "groupid": "%d",
   "devicename": "%s",
   "relay":"%d",
@@ -385,7 +385,7 @@ const char message[] = R"rawliteral(
   "irms":"%.2f",
   "pf": "%.2f",
   "freq": "%.2f",
-  "Q": "%f",
+  "Q": "%.2f",
   "S":"%.2f",
   "P":"%.2f",
   "time":"%d",

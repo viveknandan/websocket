@@ -33,7 +33,7 @@ typedef enum
 typedef struct SmartSocketInfo_
 {
     uint8_t consversion_started;
-    uint8_t id;
+    uint64_t id;
     uint8_t name[SMART_SOCKET_NAME_LEN];
     uint32_t data_send_interval;
     uint8_t relay_state;

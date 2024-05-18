@@ -12,6 +12,10 @@
 
 void wss_server_send_messages(httpd_handle_t *server);
 void connect_handler(void *arg, esp_event_base_t event_base,
-                            int32_t event_id, void *event_data);
+                     int32_t event_id, void *event_data);
 void disconnect_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data);
+                        int32_t event_id, void *event_data);
+void got_ip_handler(void *arg, esp_event_base_t event_base,
+                    int32_t event_id, void *event_data);
+void lost_ip_handler(void *arg, esp_event_base_t event_base,
+                     int32_t event_id, void *event_data);

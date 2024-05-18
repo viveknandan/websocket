@@ -147,7 +147,7 @@ static esp_err_t get_req_handler(httpd_req_t *req)
 }
 static esp_err_t login_req_handler(httpd_req_t *req)
 {
-    
+
     return send_web_page(req, 1);
 }
 static esp_err_t status_req_handler(httpd_req_t *req)
@@ -190,20 +190,19 @@ static const httpd_uri_t uri_welcome = {
     .handle_ws_control_frames = false,
 };
 
-static void send_device_info(void* arg)
+static void send_device_info(void *arg)
 {
-
 }
 static void send_message(void *arg)
 {
     static const char *data = NULL;
-    char message_data[] = "{\"objectId\":\"111\",\"device_id:\"1234\",\"group_id:\"1234\",\"device_name:\"SmartSocket123\",\"relay\":\"1\",\"mac\":\"aa:bb:cc:dd:ee:ff\",\"ip\":\"255.255.255.255\",\"vrms\":\"999.99\",\"irms\":\"999.999\",\"pf\":\"0.0001\",\"freq\":500.11,\"Q\":9999.99,\"S\":9999.99,\"P\":9999.99,\"time\":999999999,\"measure_active\":1}";
+    char message_data[] = "{\"objectId\":\"111\",\"device_id:\"123456789\",\"group_id:\"1234\",\"device_name:\"SmartSocket123\",\"relay\":\"1\",\"mac\":\"aa:bb:cc:dd:ee:ff\",\"ip\":\"255.255.255.255\",\"vrms\":\"999.99\",\"irms\":\"999.999\",\"pf\":\"0.0001\",\"freq\":500.11,\"Q\":9999.99,\"S\":9999.99,\"P\":9999.99,\"time\":999999999,\"measure_active\":1}";
     char *msg = NULL;
     struct async_resp_arg *resp_arg = arg;
     httpd_handle_t hd = resp_arg->hd;
     int fd = resp_arg->fd;
     httpd_ws_frame_t ws_pkt;
-    msg = (char *)malloc(3*sizeof(message_data) / sizeof(char) );
+    msg = (char *)malloc(3 * sizeof(message_data) / sizeof(char));
     SmartSocketInfo *info = getSmartSocketInfo();
     memset(msg, 0, 3 * sizeof(message_data));
     data = getMessage();
@@ -223,13 +222,13 @@ static void send_message(void *arg)
     double S = info->S;
     double P = info->P;
     struct timeval tv_now;
-    gettimeofday(&tv_now,NULL);
+    gettimeofday(&tv_now, NULL);
 
-    unsigned int time_val = tv_now.tv_usec/1000;
+    unsigned int time_val = tv_now.tv_usec / 1000;
     uint8_t measure_active = info->consversion_started;
-    sprintf(msg, data, objectid, info->id,1,"SmartSocket",info->relay_state, mac, ip, vrms, Irms, pf, freq, Q, S, P, (int)time, measure_active);
-    //ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
-    //ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
+    sprintf(msg, data, objectid, info->id, 1, "SmartSocket", info->relay_state, mac, ip, vrms, Irms, pf, freq, Q, S, P, (int)time, measure_active);
+    // ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
+    // ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.payload = (uint8_t *)msg;
     ws_pkt.len = strlen(msg);
@@ -347,6 +346,17 @@ void disconnect_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+void got_ip_handler(void *arg, esp_event_base_t event_base,
+                    int32_t event_id, void *event_data)
+{
+
+}
+
+void lost_ip_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+
+}
+
 void connect_handler(void *arg, esp_event_base_t event_base,
                      int32_t event_id, void *event_data)
 {
@@ -376,7 +386,7 @@ void wss_server_send_messages(httpd_handle_t *server)
             int sock = client_fds[i];
             if (httpd_ws_get_fd_info(*server, sock) == HTTPD_WS_CLIENT_WEBSOCKET)
             {
-                //ESP_LOGI(TAG, "Active client (fd=%d) -> sending async message", sock);
+                // ESP_LOGI(TAG, "Active client (fd=%d) -> sending async message", sock);
                 struct async_resp_arg *resp_arg = malloc(sizeof(struct async_resp_arg));
                 resp_arg->hd = *server;
                 resp_arg->fd = sock;

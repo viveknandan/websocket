@@ -19,7 +19,7 @@ extern "C"
 #define SINGLE 0b00010100
 #define CONT 0b00010101
 #define HALT 0b00011000
-
+#define READRESULT(data) (0x00FFFFFFLU & (data[0]|data[1]<<8|data[2]<<16))
 
 
 #define MSBnull 1
@@ -45,7 +45,7 @@ extern "C"
 #define V_FS_RMS_V 0.17676 // 250mVpp
 #define V_MAX_RMS (V_FS_RMS_V / V_ALFA)
 #define I_FS 0.6
-#define I_FS_RMS_V 0.3535 // 250mVpp with GAIN 10x, otherwise with GAIN 50x 50mVpp --> 0.3535 Vrms
+#define I_FS_RMS_V 0.17676 // 250mVpp with GAIN 10x, otherwise with GAIN 50x 50mVpp --> 0.3535 Vrms
 #define I_MAX_RMS_A (I_FS_RMS_V / R_SHUNT_OHM)
 #define P_FS 0.36
 #define P_COEFF ((V_MAX_RMS * I_MAX_RMS_A) / (P_FS * SYS_GAIN * SYS_GAIN))
@@ -149,9 +149,6 @@ DO_Function_t;
 CS5490Register* getRegisters();
 uint8_t getRegisterCount();
 double CS5490_toDouble(int LSBpow, int MSBoption, uint32_t buffer);
-uint32_t CS5490_toBinary(int LSBpow, int MSBoption, double input);
-inline uint32_t READRESULT(char* data){ return (0x00FFFFFFLU & (data[0]|data[1]<<8|data[2]<<16));}
-void CS5490_Callibrate();
 
 #ifdef __cplus_plus
 }
