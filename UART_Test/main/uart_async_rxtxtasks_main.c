@@ -15,32 +15,18 @@
 #include "driver/gpio.h"
 #include "CS5490.h"
 #include <math.h>
-
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "ssd1306.h"
-#include "websocket_server.h"
-#include "soft_ap.h"
-#include "command_parser.h"
-#include "web_page.h"
-#include "math.h"
-const double theta_error = -0.33;
-static  SSD1306_t ssd1306;;
+
+static TaskHandle_t tx_task_handle;
+static TaskHandle_t rx_task_handle;
+
 typedef struct ReadData_
 {
-    char data[4];
+    char data[21];
     uint16_t len;
 } ReadData;
-
-static SmartSocketInfo socketinfo =
-    {
-        0,
-        0,
-        "SmartSocket",
-        0,
-        0,
-        0,
-        0,
-        0,
-        0};
 
 ReadData rx_data;
 
@@ -52,15 +38,13 @@ static const int RX_BUF_SIZE = 1024;
 
 static QueueHandle_t rxhandle;
 static QueueHandle_t txhandle;
-static QueueHandle_t cs5490handle;
-nvs_handle_t cs_nvshandle;
-
+static nvs_handle_t app_nvs_handle;
 struct uart_data_t
 {
     char *data;
     uint8_t len;
 };
-void init(void)
+void init()
 {
     const uart_config_t uart_config = {
         .baud_rate = 600,
@@ -76,7 +60,7 @@ void init(void)
     uart_set_pin(UART_NUM_1, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 }
 
-int init_nvsflash(nvs_handle_t* nvs_handle_param)
+int init_nvsflash(nvs_handle_t *nvs_handle_param)
 {
     // Initialize NVS
     esp_err_t err = nvs_flash_init();
@@ -105,15 +89,81 @@ int init_nvsflash(nvs_handle_t* nvs_handle_param)
     }
 }
 
-SmartSocketInfo *getSmartSocketInfo()
+esp_err_t read_nvs_flash(const char *field, int32_t *pData)
 {
-    return &socketinfo;
+    int32_t val = 0;
+    esp_err_t err = nvs_get_i32(app_nvs_handle, field, &val);
+    if (err == ESP_OK)
+    {
+        *pData = val;
+    }
+    return err;
 }
+
+esp_err_t write_nvs_flash(const char *field, const int32_t *pData)
+{
+    int32_t val = *pData;
+    esp_err_t err = nvs_set_i32(app_nvs_handle, field, val);
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(app_nvs_handle);
+    }
+    return err;
+}
+
 int sendData(const char *logName, const char *data, const int len)
 {
     const int txBytes = uart_write_bytes(UART_NUM_1, data, len);
-    ESP_LOGI(logName, "Wrote %d bytes", txBytes);
+    // ESP_LOGI(logName, "Wrote %d bytes", txBytes);
     return txBytes;
+}
+
+static void tx_task(void *arg)
+{
+    static const char *TX_TASK_TAG = "TX_TASK";
+    struct uart_data_t txdata = {0};
+    // esp_log_level_set(TX_TASK_TAG, ESP_LOG_INFO);
+    while (1)
+    {
+        xQueueReceive(txhandle, &txdata, portMAX_DELAY);
+        if (txdata.data)
+        {
+            // ESP_LOGI(TX_TASK_TAG, "Data valid: Sending, len=%d", (int)txdata.len);
+            sendData(TX_TASK_TAG, txdata.data, txdata.len);
+        }
+        else
+        {
+            // ESP_LOGI(TX_TASK_TAG, "Data invalid: Not Sending");
+        }
+    }
+}
+
+static void rx_task(void *arg)
+{
+    static const char *RX_TASK_TAG = "RX_TASK";
+    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
+    uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
+    int i = 0;
+    while (1)
+    {
+        const int rxBytes = uart_read_bytes(UART_NUM_1, data, RX_BUF_SIZE, 250 / portTICK_PERIOD_MS);
+        if (rxBytes > 0)
+        {
+            data[rxBytes] = 0;
+            for (i = 0; i < rxBytes; i++)
+            {
+                // ESP_LOGI(RX_TASK_TAG, "Read %d bytes: %x", rxBytes, data[i]);
+                if (i < 4)
+                {
+                    rx_data.data[i] = data[i];
+                    rx_data.len = i + 1;
+                }
+            }
+            // ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+            xQueueSend(rxhandle, &rx_data, 0);
+        }
+    }
+    free(data);
 }
 
 int send_cmd_wait(char *byte, uint8_t size, const char *msg, uint32_t millisec)
@@ -146,14 +196,107 @@ typedef struct Command_
 void sendPageSelect(uint8_t page)
 {
     // Send Page select command
-    static uint8_t lpage;
-    int result;
+    static uint8_t current_page = 0;
+
     char cmd = PAGE(page);
-    if(lpage != page)
+    if (page != current_page)
     {
-        lpage = page;
-        result = send_cmd_wait(&cmd, 1, "Page select cmd", (uint32_t)500);
+        send_cmd_wait(&cmd, 1, "Page select cmd", (uint32_t)1000);
     }
+}
+
+void start_uart_tasks()
+{
+
+    xTaskCreate(rx_task, "uart_rx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 1, &rx_task_handle);
+    xTaskCreate(tx_task, "uart_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 2, &tx_task_handle);
+}
+
+void changeBaudRate()
+{
+    // Serialctrl = 115200* 0.128 = 14745.6 = 14746
+    //   = 0x4D or 77 => 600 Baud
+    CS5490Register *registers = getRegisters();
+    sendPageSelect(registers[Uartctrl].page);
+    uint8_t cmd = CREG_READ(registers[Uartctrl].addr);
+    uint32_t reg = send_cmd_wait((char *)&cmd, 1, "Page select cmd", (uint32_t)500);
+    reg |= 2458;
+
+    cmd = CREG_WRITE(registers[Uartctrl].addr);
+    uint8_t write_cmd[4];
+    write_cmd[0] = cmd;
+    write_cmd[1] = reg & 0xFF;
+    write_cmd[2] = (reg >> 8) & 0xFF;
+    write_cmd[3] = (reg >> 16) & 0xFF;
+    send_cmd_wait(&write_cmd, 4, "write baud 115200", (uint32_t)500);
+    // uart_set_baudrate(UART_NUM_1, 115200);
+}
+
+void enableHPFCurrentLine()
+{
+    CS5490Register *registers = getRegisters();
+    sendPageSelect(registers[Config2].page);
+    uint8_t cmd = CREG_READ(registers[Config2].addr);
+    uint32_t reg = send_cmd_wait((char *)&cmd, 1, "REad Config2", (uint32_t)500);
+    cmd = CREG_WRITE(registers[Config2].addr);
+    reg |= 0b10010; //HPF on current channel PMF on voltage channel
+    uint8_t write_cmd[4];
+    write_cmd[0] = cmd;
+    write_cmd[1] = reg & 0xFF;
+    write_cmd[2] = (reg >> 8) & 0xFF;
+    write_cmd[3] = (reg >> 16) & 0xFF;
+    send_cmd_wait(&write_cmd, 4, "write config2", (uint32_t)500);
+    // config2 |= 0b01000 //HPF
+    // config2 |= 0b10000 //Phase matching
+}
+void enableHPFVoltageLine()
+{
+    // config2 |= 0b010 HPF
+    // config2  |= 0b100 PM
+
+    CS5490Register *registers = getRegisters();
+    sendPageSelect(registers[Config2].page);
+    uint32_t cmd = CREG_READ(registers[Config2].addr);
+    uint32_t reg = send_cmd_wait(&cmd, 1, "REad Config2", (uint32_t)500);
+    cmd = CREG_WRITE(registers[Config2].addr);
+    reg |= 0b100;
+    uint8_t write_cmd[4];
+    write_cmd[0] = cmd;
+    write_cmd[1] = reg & 0xFF;
+    write_cmd[2] = (reg >> 8) & 0xFF;
+    write_cmd[3] = (reg >> 16) & 0xFF;
+    send_cmd_wait(&write_cmd, 4, "Config2", (uint32_t)500);
+}
+
+void cs_write(char page, char addr, uint32_t val)
+{
+    sendPageSelect(page);
+    uint8_t cmd = CREG_WRITE(addr);
+    uint8_t write_cmd[4];
+    write_cmd[0] = cmd;
+    write_cmd[1] = val & 0xFF;
+    write_cmd[2] = (val >> 8) & 0xFF;
+    write_cmd[3] = (val >> 16) & 0xFF;
+    uint32_t reg = send_cmd_wait((char *)&write_cmd, 4, "cs_write", (uint32_t)500);
+}
+
+uint32_t cs_read(char page, char addr)
+{
+    sendPageSelect(page);
+    uint8_t cmd = CREG_READ(addr);
+    uint32_t reg = send_cmd_wait((char *)&cmd, 1, "cs_read", (uint32_t)500);
+    return reg;
+}
+void setPositiveEnergyOnly()
+{
+}
+
+void CS5490_hwreset()
+{
+    gpio_set_level(11, 0);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_set_level(11, 1);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
 double convertToDouble_unsigned(uint32_t val)
@@ -184,13 +327,15 @@ double readIrms()
     sendPageSelect(registers[Rmscurrent].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Rmscurrent].addr);
-    int result = send_cmd_wait(&cmd, 1, "Irms read", 1000);
+    int result = send_cmd_wait(&cmd, 1, "Irms read", 500);
     // value = convertToDouble_unsigned(result);
     value = CS5490_toDouble(24, MSBunsigned, result);
     value = (((value / SYS_GAIN) / I_FS) * I_FS_RMS_V) / R_SHUNT_OHM;
+    value = value;
     ESP_LOGI("CS5490", "Irms = %d => %f", result, value);
     return value;
 }
+
 
 double readVrms()
 {
@@ -198,7 +343,7 @@ double readVrms()
     sendPageSelect(registers[Rmsvoltage].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Rmsvoltage].addr);
-    int result = send_cmd_wait(&cmd, 1, "Vrms read", 1000);
+    int result = send_cmd_wait(&cmd, 1, "Vrms read", 500);
     value = CS5490_toDouble(24, MSBunsigned, result);
     value = (((value / SYS_GAIN) / V_FS) * V_FS_RMS_V) / V_ALFA;
     ESP_LOGI("CS5490", "Vrms = %d => %f", result, value);
@@ -211,11 +356,9 @@ double readPf()
     sendPageSelect(registers[powerfactor].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[powerfactor].addr);
-    int result = send_cmd_wait(&cmd, 1, "Pf read", 1000);
+    int result = send_cmd_wait(&cmd, 1, "Pf read", 500);
     value = CS5490_toDouble(23, MSBsigned, result);
-    value = cos(acosl(value)-acosl(-0.33));
-
-
+    ESP_LOGI("CS5490", "Pf = %d => %f", result, value);
     return value;
 }
 
@@ -225,8 +368,10 @@ double readAvgS()
     sendPageSelect(registers[Spower].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Spower].addr);
-    int result = send_cmd_wait(&cmd, 1, "Average S read", 1000);
-    return CS5490_toDouble(23, MSBsigned, result);
+    int result = send_cmd_wait(&cmd, 1, "Average S read", 500);
+    value = CS5490_toDouble(23, MSBsigned, result);
+    ESP_LOGI("CS5490", "S = %d => %f", result, value);
+    return value;
 }
 
 double readAvgQ()
@@ -235,8 +380,10 @@ double readAvgQ()
     sendPageSelect(registers[Qavg].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Qavg].addr);
-    int result = send_cmd_wait(&cmd, 1, "Average Q read", 1000);
-    return CS5490_toDouble(23, MSBsigned, result);
+    int result = send_cmd_wait(&cmd, 1, "Average Q read", 500);
+    value = CS5490_toDouble(23, MSBsigned, result);
+    ESP_LOGI("CS5490", "Q = %d => %f", result, value);
+    return value;
 }
 double readAverageActivePower()
 {
@@ -244,9 +391,9 @@ double readAverageActivePower()
     sendPageSelect(registers[Activeavg].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Activeavg].addr);
-    int result = send_cmd_wait(&cmd, 1, "Average Q read", 1000);
+    int result = send_cmd_wait(&cmd, 1, "Average Active read", 500);
     value = CS5490_toDouble(23, MSBsigned, result);
-    ESP_LOGI("CS5490", "AvgQ = %d => %f", result, value);
+    ESP_LOGI("CS5490", "ActivePower = %d => %f", result, value);
     return value;
 }
 
@@ -256,18 +403,77 @@ double readFreq()
     sendPageSelect(registers[Epsilon].page);
     double value = 1.0;
     char cmd = CREG_READ(registers[Epsilon].addr);
-    int result = send_cmd_wait(&cmd, 1, "Freq read", 1000);
+    int result = send_cmd_wait(&cmd, 1, "Freq read", 500);
     value = 4000 * CS5490_toDouble(23, MSBunsigned, result);
     ESP_LOGI("CS5490", "freq = %d => %f", result, value);
     return value;
 }
 
-void CS5490_hwreset()
+void readAllPower()
 {
-    gpio_set_level(11, 0);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    gpio_set_level(11, 1);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    CS5490Register *registers = getRegisters();
+    // V,I,P,Q,S,F,PF => 21 bytes
+    struct uart_data_t txdata;
+
+    sendPageSelect(16);
+    uint32_t cmd_resp_buffer[7] = {0};
+    char cmd_buffer[7] = {
+        CREG_READ(CREG_READ(registers[Rmsvoltage].addr)),
+        CREG_READ(registers[Rmscurrent].addr),
+        CREG_READ(registers[Activeavg].addr),
+        CREG_READ(registers[Qavg].addr),
+        CREG_READ(registers[Spower].addr),
+        CREG_READ(registers[Epsilon].addr),
+        CREG_READ(registers[powerfactor].addr)};
+    txdata.data = cmd_buffer;
+    txdata.len = 1;
+    for (int i = 0; i < 7; i++)
+    {
+        txdata.data = &cmd_buffer[i];
+        xQueueSend(txhandle, &txdata, 0);
+        xQueueReceive(rxhandle, &rx_data, 500 / portTICK_PERIOD_MS);
+        cmd_resp_buffer[i] = READRESULT(rx_data.data);
+    }
+    /*
+    xQueueSend(txhandle, &txdata, 0);
+    xQueueReceive(rxhandle, &rx_data, 5000 / portTICK_PERIOD_MS);
+    if (rx_data.len)
+    {
+        int idx = 0;
+        for (int i = 0; i < rx_data.len; i = 1 + 3)
+        {
+            cmd_resp_buffer[idx] = READRESULT(&rx_data.data[i]);
+        }
+    }
+        */
+    double value;
+    double vrms;
+    vrms = CS5490_toDouble(24, MSBunsigned, cmd_resp_buffer[0]);
+    vrms = (((vrms / SYS_GAIN) / V_FS) * V_FS_RMS_V) / V_ALFA;
+    ESP_LOGI("CS5490", "Vrms = %d => %f", (int)cmd_resp_buffer[0], vrms);
+    double irms;
+    irms = CS5490_toDouble(24, MSBunsigned, cmd_resp_buffer[1]);
+    irms = (((irms / SYS_GAIN) / I_FS) * I_FS_RMS_V) / R_SHUNT_OHM;
+    ESP_LOGI("CS5490", "Irms = %d => %f", (int)cmd_resp_buffer[1], (irms));
+
+    value = CS5490_toDouble(23, MSBsigned, cmd_resp_buffer[2]);
+    ESP_LOGI("CS5490", "P = %d => %f", (int)cmd_resp_buffer[2], value);
+
+    value = CS5490_toDouble(23, MSBsigned, cmd_resp_buffer[3]);
+    ESP_LOGI("CS5490", "Q = %d => %f", (int)cmd_resp_buffer[3], value);
+
+    value = CS5490_toDouble(23, MSBsigned, cmd_resp_buffer[4]);
+    ESP_LOGI("CS5490", "S = %d => %f", (int)cmd_resp_buffer[4], value);
+
+    value = 4000 * CS5490_toDouble(23, MSBunsigned, cmd_resp_buffer[5]);
+    ESP_LOGI("CS5490", "freq = %d => %f", (int)cmd_resp_buffer[5], value);
+
+    value = CS5490_toDouble(23, MSBsigned, cmd_resp_buffer[6]);
+    ESP_LOGI("CS5490", "pf = %d => %f", (int)cmd_resp_buffer[6], value);
+}
+
+void callibrate()
+{
 }
 void setDOpinFunction(DO_Function_t DO_fnct, uint8_t openDrain)
 {
@@ -298,33 +504,40 @@ void setDOpinFunction(DO_Function_t DO_fnct, uint8_t openDrain)
         write_cmd[2] = reg >> 8 & 0xFF;
         write_cmd[3] = reg >> 16 & 0xFF;
         ESP_LOGI("CS5490", "Writing Register:%u", (unsigned int)reg);
-        send_cmd_wait(write_cmd, 4, registers[Config1].name, 1000);
+        send_cmd_wait(write_cmd, 4, registers[Config1].name, 500);
     }
 }
 
+void setPGA_CurrrentChanel()
+{
+    cs_write(0,0,0xC02000|0b100000);
+}
+void sendSoftReset()
+{
+    // Send RESET COMMAND
+    char cmd = CMD(SOFT_RESET);
+    send_cmd_wait(&cmd, 1, "Soft Reset", 500);
+}
 void CS5490_Test(bool setdefault)
 {
     // Verify default content of registers
     CS5490Register *pRegisters = getRegisters();
     int result = 0;
     uint8_t page = 0;
-    // Send RESET COMMAND
-    char cmd = CMD(SOFT_RESET);
-    char write_cmd[4] = {0};
-    result = send_cmd_wait(&cmd, 1, "Soft Reset", 1000);
 
-    if (result > 0)
-    {
-        ESP_LOGI("CS5490", "Soft reset result: %d", result);
-    }
-    else
-    {
-        ESP_LOGI("CS5490", "Communication timeout");
-    }
+    // if (result > 0)
+    // {
+    //     ESP_LOGI("CS5490", "Soft reset result: %d", result);
+    // }
+    // else
+    // {
+    //     ESP_LOGI("CS5490", "Communication timeout");
+    // }
 
     for (int i = 0; i < getRegisterCount(); i++)
     {
-
+        char write_cmd[4] = {0};
+        char cmd;
         sendPageSelect(pRegisters[i].page);
         cmd = CREG_READ(pRegisters[i].addr);
         result = send_cmd_wait(&cmd, 1, pRegisters[i].name, (uint32_t)50000);
@@ -364,299 +577,174 @@ void startConversion(bool isCont)
     {
         cmd = CMD(SINGLE);
     }
-    int result = send_cmd_wait(&cmd, 1, "Starting conversion", 5000);
+    int result = send_cmd_wait(&cmd, 1, "Starting conversion", 2000);
 }
 
-bool hasConsversionStarted()
+void haltConversion()
 {
-    // Read status2 register
-    CS5490Register *registers = getRegisters();
-    sendPageSelect(registers[Status2].page);
-    char cmd = CREG_READ(registers[Status2].addr);
-    int reg = send_cmd_wait(&cmd, 1, "Get conversion status", 1000);
-    return ((reg & 11) == 11) ? true : false;
+    char cmd = CMD(HALT);
+    int result = send_cmd_wait(&cmd, 1, "Halting conversion", 500);
 }
 
-static void tx_task(void *arg)
+void cs_instruct(char pcmd)
 {
-    static const char *TX_TASK_TAG = "TX_TASK";
-    struct uart_data_t txdata = {0};
-    esp_log_level_set(TX_TASK_TAG, ESP_LOG_INFO);
-    while (1)
+    char cmd = CMD(pcmd);
+    int result = send_cmd_wait(&cmd, 1, "Send command", 500);
+}
+void reinstall_uart()
+{
+    const uart_config_t uart_config = {
+        .baud_rate = 19200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    // delete tx tx tasks
+    vTaskDelete(rx_task_handle);
+    vTaskDelete(tx_task_handle);
+    // We won't use a buffer for sending data.
+    if (uart_is_driver_installed(UART_NUM_1))
     {
-        xQueueReceive(txhandle, &txdata, portMAX_DELAY);
-        if (txdata.data)
-        {
-            ESP_LOGI(TX_TASK_TAG, "Data valid: Sending, len=%d", (int)txdata.len);
-            sendData(TX_TASK_TAG, txdata.data, txdata.len);
-        }
-        else
-        {
-            ESP_LOGI(TX_TASK_TAG, "Data invalid: Not Sending");
-        }
+        uart_driver_delete(UART_NUM_1);
     }
+    uart_driver_install(UART_NUM_1, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM_1, &uart_config);
+    uart_set_pin(UART_NUM_1, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    // Restore rx tx tasks
+    start_uart_tasks();
 }
 
-static void rx_task(void *arg)
+void callibratePowerOffsets()
 {
-    static const char *RX_TASK_TAG = "RX_TASK";
-    esp_log_level_set(RX_TASK_TAG, ESP_LOG_INFO);
-    uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
-    int i = 0;
-    while (1)
-    {
-        const int rxBytes = uart_read_bytes(UART_NUM_1, data, RX_BUF_SIZE, 250 / portTICK_PERIOD_MS);
-        if (rxBytes > 0)
-        {
-            data[rxBytes] = 0;
-            for (i = 0; i < rxBytes; i++)
-            {
-                ESP_LOGI(RX_TASK_TAG, "Read %d bytes: %x", rxBytes, data[i]);
-                if (i < 4)
-                {
-                    rx_data.data[i] = data[i];
-                    rx_data.len = i + 1;
-                }
-            }
-            ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
-            xQueueSend(rxhandle, &rx_data, 0);
-        }
-    }
-    free(data);
+    //Turn off Load
+    gpio_set_level(GPIO_NUM_10,0);
+    //Reset CS5490
+    CS5490_hwreset();
+    //
 }
-
-static void cs5490_read_task()
+void setIDCOffset(double val)
 {
-    char cmd;
-    uint32_t read_delay = 1000;
-    const char cmd_stop_read = 0;
-    const char cmd_start_read = 1;
-    const char cmd_update_delay = 2;
-    bool read_device = false;
-    const char displayf[] = "%s: %.2f";
-    static char display[30] ;
-    while (1)
-    {
-        xQueueReceive(cs5490handle, &cmd, 100 / portTICK_PERIOD_MS);
-        if (cmd == cmd_stop_read)
-        {
-            read_device = false;
-        }
-        if (cmd == cmd_start_read)
-        {
-            ESP_LOGI("task_cs5490", "Reading values ...");
-            read_device = true;
-            read_delay = socketinfo.data_send_interval * 1000;
-            startConversion(true);
-            setDOpinFunction(DO_V_ZERO_CROSSING, 0);
-            ESP_LOGI("task_cs5490", "Init done");
-        }
-        if (read_device)
-        {
-            ESP_LOGI("task_cs5490", "Reading in progress");
-            double vrms = readVrms();
-            double irms = roundf((readIrms()-0.35)*10);
-            irms = irms/10 ;
-            double pf = readPf();
-            if(irms ==0)
-            {
-                pf = 0; //Undefined
-            }
-            double apparantpower = vrms*irms;
-            double activepower = vrms*irms*pf;
-            double reactivepower = vrms*irms*(1-pf);
-            double freq = readFreq();
-           ESP_LOGI("CS5490", "Vrms = %f, Irms = %f, activeP = %f, apparantP = %f, reactiveP = %f freq = %f", vrms, irms, activepower, apparantpower, reactivepower, freq);
-            socketinfo.vrms = vrms;
-            socketinfo.irms = irms;
-            socketinfo.freq = freq;
-            socketinfo.P = activepower;
-            socketinfo.S = apparantpower;
-            socketinfo.Q = reactivepower;
-            socketinfo.pf = readPf();
-            socketinfo.consversion_started = 1;
-            memset(display,0,30);
-        sprintf(display,displayf,"V ",vrms);
-        ssd1306_display_text(&ssd1306, 2, display, 30, false);
-        memset(display,0,30);
-        sprintf(display,displayf,"I ",irms);
-        memset(display,0,30);
-        sprintf(display,displayf,"I ",irms);
-        ssd1306_display_text(&ssd1306, 3, display, 30, false);
-        ssd1306_contrast(&ssd1306, 0xff);
-            //ESP_LOGI("task_cs5490", "Reading done");
-        }
-        vTaskDelay(read_delay / portTICK_PERIOD_MS);
-    }
+    uint32_t val2 = CS5490_toBinary(23,MSBsigned,val);
+    cs_write(16,32,val2);
 }
-void start_cs5490_task()
+
+
+void zeroloadcallibration()
 {
-    cs5490handle = xQueueCreate(10, sizeof(char));
-    xTaskCreate(cs5490_read_task, "cs5490_task", 1024 * 2, NULL, configMAX_PRIORITIES - 1, NULL);
+    //Set Tsettle = 2000
+    cs_write(16,57,2000);
+    //Set Sample count 16000
+    cs_write(16,57,16000);
+    //Clear DRDY
+    cs_write(0,23,0x800000);
+    //Send AC offset callibration 0xF6
+    cs_instruct(0xFC);
+    //id DRDY set ?
+     char DRDY = cs_read(0,23);
+     int tries = 10;
+     while(DRDY != 0x00 && tries >0)
+     {
+        DRDY = cs_read(0,23);
+        tries--;
+     }
+  double irms=0;
+  uint32_t iaoff=0;
+    // Yes then read IRMS, IACOFF
+    if(DRDY == 0)
+     {
+        ESP_LOGI("cs5490","DRDY is zeo. Sucess!!");
+        irms  =readIrms();
+        iaoff = cs_read(16,37);
+     }
+    ESP_LOGI("cs5490","IAOFF: %d , irms = %f", (int)iaoff,irms);
+    //If IAOFF ==0 then failed
+    //else return IACOFF to main flow.
 }
-void start_uart_tasks()
+
+void setPoffZero()
 {
-    txhandle = xQueueCreate(10, sizeof(struct uart_data_t));
-    rxhandle = xQueueCreate(10, sizeof(ReadData));
-    xTaskCreate(rx_task, "uart_rx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 2, NULL);
-    xTaskCreate(tx_task, "uart_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 3, NULL);
+    //Active P 0.000587
+    // Apparent P 0.001791
+    cs_write(16,15),;
 }
-void SmartSocket_ProcessMessage(const char *msg)
-{
-    // Parse data
-    // Process commands
-    // Format:
-    /*
-    Command structure
-
-
-cmd:cmd_id,arg1,arg1type,arg2,arg2type,....;
-cmd
-
-cmd_id = a positive number
-arg_type = 0; integer
-arg_type = 1 ; float
-arg_type = 1; str
-
-
-
-enum Commands
-{
-  RELAY_ON = 0,
-  RELAY_OFF = 1,
-  START_MEASURE = 2,
-  STOP_MEASURE  =3,
-  SET_TIME  =4,
-  START_LOG  = 5,
-  STOP_LOG = 6,
-}
-
-
-const Commands = Object.freeze({
-    RELAY_ON: 0,
-    RELAY_OFF: 1,
-    START_MEASURE: 2,
-    STOP_MEASURE: 3,
-    SET_TIME: 4,
-    START_LOG: 5,
-    STOP_LOG: 6,
-});
-    */
-
-    Web_command cmd;
-    uint32_t cmd_id;
-    char *ptr;
-    uint32_t anArguments = parse_webcommand(msg, &cmd);
-    int len = cmd.arg_len;
-    for (int i = 0; i < cmd.arg_len; i++)
-    {
-        ESP_LOGI("CMD", "%s =>%d:(%s,%s)\n", cmd.id, i, cmd.arg[i].arg, cmd.arg[i].value);
-    }
-    cmd_id = strtol(cmd.id, &ptr, 10);
-    ESP_LOGI("ProcessMsg", "Command recieved:%s -> %d", (char *)cmd.id, (int)cmd_id);
-    switch ((Commands)cmd_id)
-    {
-    case RELAY_ON:
-        ESP_LOGI("ProcessMsg", "Setting relay ON!");
-        gpio_set_level(GPIO_NUM_10, 1);
-        break;
-    case RELAY_OFF:
-        ESP_LOGI("ProcessMsg", "Setting relay OFF!");
-        gpio_set_level(GPIO_NUM_10, 0);
-        break;
-    case START_MEASURE:
-    {
-        ESP_LOGI("ProcessMsg", "Start measure!");
-        uint8_t task_cmd_start = 1;
-        uint8_t task_cmd_update_delay = 3;
-        socketinfo.data_send_interval = (uint32_t)strtol(cmd.arg[0].arg, &ptr, 10);
-        if (socketinfo.data_send_interval >= 1)
-        {
-            // xQueueSend(cs5490handle,&task_cmd_update_delay,0);
-            xQueueSend(cs5490handle, &task_cmd_start, 0);
-        }
-        // xQueueSend(cs5490handle,&task_cmd_start,0);
-        ESP_LOGI("ProcessMessage", "Interval set to :%d", (int)socketinfo.data_send_interval);
-    }
-    break;
-    case STOP_MEASURE:
-    {
-        uint8_t task_cmd_stop = 0;
-        if (socketinfo.consversion_started == 1)
-        {
-            // Reset CS5490
-            xQueueSend(cs5490handle, &task_cmd_stop, 0);
-            CS5490_hwreset();
-            socketinfo.consversion_started = 0;
-        }
-
-        ESP_LOGI("ProcessMessage", "Conversion is stopped. CS5490 is reset:%d", (int)socketinfo.data_send_interval);
-    }
-    break;
-        break;
-    case SET_TIME:
-        break;
-    case START_LOG:
-        break;
-    case STOP_LOG:
-        break;
-    case DISCOVER:
-    //Return list of devices in the mesh network
-    //Applicable to root node only
-    break;
-    case SELECTDEVICE:
-    //Broadcast command to device over mesh network
-    break;
-    default:
-        break;
-    }
-
-    free_web_command(cmd);
-}
-
 void app_main(void)
 {
 
     int level = 0;
-
-    static httpd_handle_t server = NULL;
-    init_nvsflash(&cs_nvshandle);
-    //ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    SSD1306_t ssd1306;
+    txhandle = xQueueCreate(10, sizeof(struct uart_data_t));
+    rxhandle = xQueueCreate(10, sizeof(ReadData));
     init();
-
     i2c_master_init(&ssd1306, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO);
     ssd1306_init(&ssd1306, 128, 64);
-    gpio_set_direction(10, GPIO_MODE_INPUT_OUTPUT);
+    ssd1306_display_text(&ssd1306, 1, "Welcome to SmartSocket ", 5, false);
+    ssd1306_display_text(&ssd1306, 2, "Initalizating... ", 16, false);
+    gpio_set_direction(10, GPIO_MODE_OUTPUT);
     gpio_set_direction(11, GPIO_MODE_OUTPUT);
 
     start_uart_tasks();
-    start_cs5490_task();
-    CS5490_hwreset();
-    gpio_set_level(10, 0);
+
+    gpio_set_level(11, 0);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_set_level(11, 1);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_set_level(10, 1);
+
+    sendSoftReset();
+    //enableHPFCurrentLine();
+    //setPGA_CurrrentChanel();
+
+    //setIDCOffset(-0.203318);
+    //CS5490_Callibrate();
+    zeroloadcallibration();
+    setDOpinFunction(DO_V_ZERO_CROSSING, 0);
     ssd1306_clear_screen(&ssd1306, false);
     ssd1306_contrast(&ssd1306, 0x0f);
-    ssd1306_display_text(&ssd1306, 1, "Initalized!", 11, false);
-
-    // Start WiFi and Webserver
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        WIFI_EVENT_AP_STACONNECTED,
-                                                        &connect_handler, &server,
-                                                        NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        WIFI_EVENT_AP_STADISCONNECTED,
-                                                        &disconnect_handler, &server,
-                                                        NULL));
-    wifi_init_softap();
-
+    ssd1306_display_text(&ssd1306, 2, "Ready! ", 6, false);
+    ESP_LOGI("CS5490", "Callibration Done");
+    const char displayf[] = "%s: %.2f";
+    static char display[30] ;
     while (1)
     {
+        memset(display,0,30);
+        if (level == 0)
+        {
+            level = 1;
+        }
+        else
+        {
+            level = 0;
+        }
 
-        socketinfo.relay_state = gpio_get_level(GPIO_NUM_10);
+        // for(i = 0; i< sizeof(cmd_data)/sizeof(Command); i++)
+        // {
+        //     send_cmd(&cmd_data[i].cmd,cmd_data[i].name);
+        //     ESP_LOGI("RESP", "cmd(%s)=>",cmd_data[i].name);
+        //     ESP_LOG_BUFFER_HEXDUMP("RESP", rx_data.data, rx_data.len, ESP_LOG_INFO);
+        // }
+        // haltConversion();
+
+        // readAllPower();
+        sendSoftReset();
+        startConversion(true);
+        //startConversion(true);
         vTaskDelay(1000 / portTICK_PERIOD_MS);
-        wss_server_send_messages(&server);
-
+        haltConversion();
+        double vrms = readVrms();
+        double irms = readIrms();
+        double activepower = readAverageActivePower();
+        double pf = readPf();
+        double apparantpower = readAvgS();
+        double reactivepower = readAvgQ();
+        double freq = readFreq();
+        ESP_LOGI("CS5490", "Vrms = %f, Irms = %f, activeP = %f, pf = %f, apparantP = %f, reactiveP = %f freq = %f", vrms, irms, activepower, pf, apparantpower, reactivepower, freq);
+        sprintf(display,displayf,"V:",vrms);
+        ssd1306_display_text(&ssd1306, 2, display, 30, false);
+        memset(display,0,30);
+        sprintf(display,displayf,"I:",irms);
+        ssd1306_display_text(&ssd1306, 3, display, 30, false);
+        ssd1306_contrast(&ssd1306, 0xff);
     }
 }
