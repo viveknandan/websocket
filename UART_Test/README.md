@@ -5,22 +5,14 @@
 
 (See the README.md file in the upper level 'examples' directory for more information about examples.)
 
-This example demonstrates how two asynchronous tasks can use the same UART interface for communication. One can use
-this example to develop more complex applications for serial communication.
-
-The example starts two FreeRTOS tasks:
-1. The first task periodically transmits `Hello world` via the UART.
-2. The second task task listens, receives and prints data from the UART.
-
-## How to use example
+This is a project to domestarte Smart Socket using WebSocket and ESP WiFi Mesh
+## How to use.
 
 ### Hardware Required
 
 Smart Socket prototype board running ESP32C6
 ### Setup the Hardware
-
-The `RXD_PIN` and `TXD_PIN` which are configurable in the code (by default `GPIO4` and `GPIO5`) need to be shorted in
-order to receive back the same data which were sent out.
+Refer to Schematics and HW Manual for more details. Contact author directly on vivekece.ymca@gmail.com
 
 ### Configure the project
 
