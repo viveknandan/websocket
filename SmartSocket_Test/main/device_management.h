@@ -10,7 +10,7 @@ typedef struct SmartSocketDevice
     uint64_t mac;
 }SmartSocketDevice;
 // Returns array of devices
-void find_devices_by_group(uint64_t gid,SmartSocketDevice* device_list);
+uint64_t find_devices_by_group(uint64_t gid,SmartSocketDevice** device_list);
 void add_device(uint64_t mac, uint64_t groupid);
 void update_device(uint64_t mac, uint64_t groupid);
 void remove_device(uint64_t mac);

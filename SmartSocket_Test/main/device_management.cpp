@@ -7,26 +7,33 @@ using namespace std;
 struct SmartSocketDevice_cpp
 {
     SmartSocketDevice dev;
-    bool operator==(const SmartSocketDevice_cpp& node)
+    bool operator==(const SmartSocketDevice_cpp &node)
     {
-       return ((dev.group_id == node.dev.group_id && dev.mac == node.dev.mac)?true:false);
+        return ((dev.group_id == node.dev.group_id && dev.mac == node.dev.mac) ? true : false);
     }
 };
 forward_list<SmartSocketDevice_cpp> device_list;
 
-void find_devices_by_group(uint64_t gid, SmartSocketDevice *device_list_in)
+uint64_t find_devices_by_group(uint64_t gid, SmartSocketDevice **device_list_in)
 {
     uint64_t count = get_count_of_devices_in_groups(gid);
-    device_list_in = (SmartSocketDevice *)malloc(count * sizeof(SmartSocketDevice));
-    int index = 0;
-    for (auto node : device_list)
+    SmartSocketDevice* llist = NULL;
+    if (count > 0)
     {
-        if (node.dev.group_id == gid)
+        llist = (SmartSocketDevice *)malloc(count * sizeof(SmartSocketDevice));
+        int index = 0;
+        for (auto node : device_list)
         {
-            device_list_in[index].group_id = node.dev.group_id;
-            device_list_in[index].mac = node.dev.mac;
+            if (node.dev.group_id == gid)
+            {
+                llist[index].group_id = node.dev.group_id;
+                llist[index].mac = node.dev.mac;
+                index++;
+            }
         }
     }
+    *device_list_in = llist;
+    return count;
 }
 void add_device(uint64_t mac, uint64_t groupid)
 {
@@ -65,6 +72,7 @@ void remove_device(uint64_t mac)
         if (node.dev.mac == mac)
         {
             device_list.remove(node);
+            break;
         }
     }
 }
@@ -85,34 +93,39 @@ uint64_t get_count_of_groups()
 
 uint64_t get_count_of_devices_in_groups(uint64_t gid)
 {
-    set<uint64_t> group_set;
+    uint64_t count = 0;
     for (auto node : device_list)
     {
         if (node.dev.group_id == gid)
         {
-            group_set.insert(node.dev.group_id);
+            count++;
         }
     }
-    return group_set.size();
+    return count;
 }
 
-uint64_t convert_mac_to_u64(const uint8_t* mac)
+uint64_t convert_mac_to_u64(const uint8_t *mac)
 {
-   uint64_t macl = 0;
-   if(mac)
-   {
-     macl |= (uint64_t) (mac[0]|mac[1]<<8|mac[2]<<16|mac[3]<<24|mac[4]<<32 | mac[5] <<40);
-   }
-   return macl;
+    uint64_t macl = 0;
+    if (mac)
+    {
+        macl |= (uint64_t)(mac[0]);
+        macl |= (uint64_t)mac[1] << 8 ;
+        macl |= (uint64_t)mac[2] << 16;
+        macl |= (uint64_t)mac[3] << 24;
+        macl |= (uint64_t)mac[4] << 32;
+        macl |= (uint64_t)mac[5] << 40;
+    }
+    return macl;
 }
 
-void fill_buffer(uint64_t value,uint8_t* buffer, uint8_t start_index, uint8_t nBytes)
+void fill_buffer(uint64_t value, uint8_t *buffer, uint8_t start_index, uint8_t nBytes)
 {
     uint64_t vall = value;
-    uint8_t nBytes_ = (nBytes > 8)?8:nBytes;
-    for(int i = 0; i < nBytes_; i++)
+    uint8_t nBytes_ = (nBytes > 8) ? 8 : nBytes;
+    for (int i = 0; i < nBytes_; i++)
     {
-        buffer[i] = vall&0xFF;
-        vall = vall>>8;
+        buffer[i] = vall & 0xFF;
+        vall = vall >> 8;
     }
 }
