@@ -39,14 +39,14 @@ extern "C"
     } mesh_smartsocket_info_t;
 
     void start_wifi_mesh();
-    void send_child_cmd_get_info(mesh_smartsocket_ctl_t *cmd);
-    void send_child_cmd_start_cnv(mesh_smartsocket_ctl_t *cmd);
-    void send_child_cmd_relay(mesh_smartsocket_ctl_t *cmd);
-    void send_child_cmd_page_state(mesh_smartsocket_ctl_t *cmd, uint8_t session_handle, uint8_t page_state, uint32_t session_time_elapsed_in_ms);
-    void send_child_cmd_new_user_added(mesh_smartsocket_ctl_t *cmd, uint8_t *user_name, uint8_t *password);
-    void send_child_cmd_time_sysnc(mesh_smartsocket_ctl_t *cmd, uint64_t local_utc_time);
-    void send_child_cmd_user_removed(mesh_smartsocket_ctl_t *cmd, char *user);
-    void send_child_cmd_set_group(mesh_smartsocket_ctl_t *cmd, uint64_t gid);
+    void send_child_cmd_get_info(void);
+    void send_child_cmd_start_cnv(void);
+    void send_child_cmd_relay(void);
+    void send_child_cmd_page_state(uint8_t session_handle, uint8_t page_state, uint32_t session_time_elapsed_in_ms);
+    void send_child_cmd_new_user_added(uint8_t *user_name, uint8_t *password);
+    void send_child_cmd_time_sysnc(uint64_t local_utc_time);
+    void send_child_cmd_user_removed(char *user);
+    void send_child_cmd_set_group(uint64_t gid);
     void send_root_selfinfo(SmartSocketInfo *info);
 #ifdef __cplusplus
 } // EXTERN"C"

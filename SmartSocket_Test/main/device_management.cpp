@@ -122,7 +122,7 @@ uint64_t convert_mac_to_u64(const uint8_t *mac)
 void fill_buffer(uint64_t value, uint8_t *buffer, uint8_t start_index, uint8_t nBytes)
 {
     uint64_t vall = value;
-    uint8_t nBytes_ = (nBytes > 8) ? 8 : nBytes;
+    uint8_t nBytes_ = (nBytes > sizeof(uint64_t)) ? sizeof(uint64_t) : nBytes;
     for (int i = 0; i < nBytes_; i++)
     {
         buffer[i] = vall & 0xFF;

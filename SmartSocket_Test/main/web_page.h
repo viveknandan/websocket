@@ -30,6 +30,15 @@ typedef enum
 
 }CommandType;
 
+typedef enum
+{
+  WEB_STATE_LOGIN,
+  WEB_STATE_WELCOME,
+  WEB_STATE_LADING,
+  WEB_STATE_CONFIG,
+  WEB_STATE_TIMEOUT
+}WebState;
+
 typedef struct SmartSocketInfo_
 {
     uint8_t consversion_started;
