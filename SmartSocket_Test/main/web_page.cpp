@@ -21,7 +21,7 @@ char *helper(const char *filename)
     strncpy(data, error_string, fsize);
     return data;
   }
-  FILE *fd = fopen(welcome_page, "r");
+  FILE *fd = fopen(filename, "r");
   fsize = (long long)sb.st_size + 1;
   data = (char *)malloc(fsize);
   memset(data, 0, fsize);
