@@ -506,9 +506,9 @@ void start_mdns_service()
     }
 
     // set hostname
-    mdns_hostname_set("myesp32");
+    mdns_hostname_set("smartsocket");
     // set default instance
-    mdns_instance_name_set("Jhon's ESP32 Thing");
+    mdns_instance_name_set("Smart Socket");
 }
 
 void ip_event_handler(void *arg, esp_event_base_t event_base,

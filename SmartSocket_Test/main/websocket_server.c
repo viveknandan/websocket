@@ -137,7 +137,6 @@ esp_err_t send_web_page(httpd_req_t *req, uint8_t page_type)
         response = httpd_resp_send(req, getWelcomePage(), HTTPD_RESP_USE_STRLEN);
     }
 
-    // int response = httpd_resp_send(req, "Hello", HTTPD_RESP_USE_STRLEN);
     return response;
 }
 
@@ -155,6 +154,39 @@ static esp_err_t status_req_handler(httpd_req_t *req)
     return send_web_page(req, 2);
 }
 
+
+static esp_err_t post_handler(httpd_req_t* req)
+{
+    /* Destination buffer for content of HTTP POST request.
+     * httpd_req_recv() accepts char* only, but content could
+     * as well be any binary data (needs type casting).
+     * In case of string data, null termination will be absent, and
+     * content length would give length of string */
+    char content[100];
+
+    /* Truncate if content length larger than the buffer */
+    size_t recv_size = MIN(req->content_len, sizeof(content));
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0) {  /* 0 return value indicates connection closed */
+        /* Check if timeout occurred */
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            /* In case of timeout one can choose to retry calling
+             * httpd_req_recv(), but to keep it simple, here we
+             * respond with an HTTP 408 (Request Timeout) error */
+            httpd_resp_send_408(req);
+        }
+        /* In case of error, returning ESP_FAIL will
+         * ensure that the underlying socket is closed */
+        return ESP_FAIL;
+    }
+
+    /* Send a simple response */
+    //ToDo: Authenticate and Manage user sessions
+    const char resp[] = "user-session-id";
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
 static const httpd_uri_t ws = {
     .uri = "/ws",
     .method = HTTP_GET,
@@ -190,6 +222,13 @@ static const httpd_uri_t uri_welcome = {
     .handle_ws_control_frames = false,
 };
 
+/* URI handler structure for POST /uri */
+httpd_uri_t uri_post = {
+    .uri      = "/auth",
+    .method   = HTTP_POST,
+    .handler  = post_handler,
+    .user_ctx = NULL
+};
 static void send_device_info(void *arg)
 {
 }

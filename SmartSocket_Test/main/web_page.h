@@ -1,13 +1,14 @@
 #pragma once
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 #define SMART_SOCKET_NAME_LEN 16
-const char* getLandingPage();
-const char* getWelcomePage();
-const char* getLoginPage();
-const char* getMessage();
+char* getLandingPage();
+char* getWelcomePage();
+char* getLoginPage();
+char* getMessage();
 
 typedef enum 
 {
