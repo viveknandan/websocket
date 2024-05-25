@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
-
+#include "esp_log.h"
 const char *welcome_page = "/spiflash/welcome.html";
 const char *login_page = "/spiflash//login.html";
 const char *landing_page = "/spiflash//landing.html";
@@ -26,7 +26,27 @@ const char message[] = R"rawliteral(
   "measure_active":"%d"
 })rawliteral";
 
-
+uint32_t count_bytes_in_file(FILE* fd)
+{
+  int i = 0;
+  char ch;
+  do
+  {
+    /* code */
+    ch = getc(fd);
+    if(ch == ' ' || ch == '\n' || ch == '\r')
+    {
+      //ignore
+    }
+    else{
+           i++;
+    }
+    
+    
+  } while (!feof(fd));
+  fseek(fd,0,SEEK_SET);
+  return i;
+}
 char *helper(const char *filename)
 {
   char *data = NULL;
@@ -41,16 +61,36 @@ char *helper(const char *filename)
     return data;
   }
   FILE *fd = fopen(filename, "r");
-  fsize = (long long)sb.st_size + 1;
+  //fsize = (long long)sb.st_size + 1;
+  fsize = count_bytes_in_file(fd)+1;
   data = (char *)malloc(fsize);
   memset(data, 0, fsize);
+  ESP_LOGI("EBPAGE","Bytes from file : %d bytes",(int)fsize);
   if (fd == NULL)
   {
     data = (char *)malloc(fsize);
     strncpy(data, error_string, fsize);
     return data;
   }
-  data = fgets(data, fsize - 1, fd);
+  //data = fgets(data, fsize - 1, fd);
+  int i = 0;
+  char ch;
+  do
+  {
+    /* code */
+    ch = getc(fd);
+    if( ch == '\n' || ch == '\r')
+    {
+      //ignore
+    }
+    else{
+           data[i++] = ch;
+    }
+    
+    
+  } while (!feof(fd));
+  
+  ESP_LOGI("EBPAGE","Bytes written to buffer : %d bytes",i);
   return data;
 }
 

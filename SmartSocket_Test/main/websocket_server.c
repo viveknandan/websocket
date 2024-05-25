@@ -122,29 +122,28 @@ void wss_close_fd(httpd_handle_t hd, int sockfd)
 esp_err_t send_web_page(httpd_req_t *req, uint8_t page_type)
 {
     int response = 0;
-    char* page = NULL;
+    char *page = NULL;
     if (page_type == 0)
     {
-        page =  getLandingPage();
+        page = getLandingPage();
     }
 
     if (page_type == 1)
     {
         page = getLoginPage();
-
     }
 
     if (page_type == 2)
     {
         page = getWelcomePage();
-
     }
-        response = httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
-        if(page)
-        {
-            free(page);
-            page = NULL;
-        }
+    ESP_LOGI("HTTPSEND","Web page size : %d",(int)strlen(page));
+    response = httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+    if (page)
+    {
+        free(page);
+        page = NULL;
+    }
     return response;
 }
 
@@ -162,8 +161,7 @@ static esp_err_t status_req_handler(httpd_req_t *req)
     return send_web_page(req, 2);
 }
 
-
-static esp_err_t post_handler(httpd_req_t* req)
+static esp_err_t post_handler(httpd_req_t *req)
 {
     /* Destination buffer for content of HTTP POST request.
      * httpd_req_recv() accepts char* only, but content could
@@ -176,9 +174,11 @@ static esp_err_t post_handler(httpd_req_t* req)
     size_t recv_size = MIN(req->content_len, sizeof(content));
 
     int ret = httpd_req_recv(req, content, recv_size);
-    if (ret <= 0) {  /* 0 return value indicates connection closed */
+    if (ret <= 0)
+    { /* 0 return value indicates connection closed */
         /* Check if timeout occurred */
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
             /* In case of timeout one can choose to retry calling
              * httpd_req_recv(), but to keep it simple, here we
              * respond with an HTTP 408 (Request Timeout) error */
@@ -190,7 +190,7 @@ static esp_err_t post_handler(httpd_req_t* req)
     }
 
     /* Send a simple response */
-    //ToDo: Authenticate and Manage user sessions
+    // ToDo: Authenticate and Manage user sessions
     const char resp[] = "user-session-id";
     httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -232,11 +232,10 @@ static const httpd_uri_t uri_welcome = {
 
 /* URI handler structure for POST /uri */
 httpd_uri_t uri_post = {
-    .uri      = "/auth",
-    .method   = HTTP_POST,
-    .handler  = post_handler,
-    .user_ctx = NULL
-};
+    .uri = "/auth",
+    .method = HTTP_POST,
+    .handler = post_handler,
+    .user_ctx = NULL};
 static void send_device_info(void *arg)
 {
 }
@@ -396,12 +395,10 @@ void disconnect_handler(void *arg, esp_event_base_t event_base,
 void got_ip_handler(void *arg, esp_event_base_t event_base,
                     int32_t event_id, void *event_data)
 {
-
 }
 
 void lost_ip_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-
 }
 
 void connect_handler(void *arg, esp_event_base_t event_base,
