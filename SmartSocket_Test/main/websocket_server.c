@@ -122,21 +122,29 @@ void wss_close_fd(httpd_handle_t hd, int sockfd)
 esp_err_t send_web_page(httpd_req_t *req, uint8_t page_type)
 {
     int response = 0;
+    char* page = NULL;
     if (page_type == 0)
     {
-        response = httpd_resp_send(req, getLandingPage(), HTTPD_RESP_USE_STRLEN);
+        page =  getLandingPage();
     }
 
     if (page_type == 1)
     {
-        response = httpd_resp_send(req, getLoginPage(), HTTPD_RESP_USE_STRLEN);
+        page = getLoginPage();
+
     }
 
     if (page_type == 2)
     {
-        response = httpd_resp_send(req, getWelcomePage(), HTTPD_RESP_USE_STRLEN);
-    }
+        page = getWelcomePage();
 
+    }
+        response = httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+        if(page)
+        {
+            free(page);
+            page = NULL;
+        }
     return response;
 }
 

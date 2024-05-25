@@ -8,7 +8,7 @@ extern "C"
 char* getLandingPage();
 char* getWelcomePage();
 char* getLoginPage();
-char* getMessage();
+const char* getMessage();
 
 typedef enum 
 {

@@ -21,9 +21,9 @@ void mount_disk(uint8_t rw_mode)
     // To mount device we need name of device partition, define base_path
     // and allow format partition in case if it is new one and was not formatted before
     const esp_vfs_fat_mount_config_t mount_config = {
-            .max_files = 512, // 4Kb file size in disk size = 2 Mb
+            .max_files = 8, // 4Kb file size in disk size = 2 Mb
             .format_if_mount_failed = false,
-            .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
+            .allocation_unit_size = 512,
             .disk_status_check_enable = false,
     };
     esp_err_t err = ESP_OK;
