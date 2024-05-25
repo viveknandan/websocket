@@ -4,9 +4,9 @@
 #include <string.h>
 #include <sys/stat.h>
 
-const char *welcome_page = "spiflash/welcome.html";
-const char *login_page = "spiflash//login.html";
-const char *landing_page = "spiflash//landing.html";
+const char *welcome_page = "/spiflash/welcome.html";
+const char *login_page = "/spiflash//login.html";
+const char *landing_page = "/spiflash//landing.html";
 const char message[] = R"rawliteral(
   {"objectId":"%d",
   "deviceid": "%l",
