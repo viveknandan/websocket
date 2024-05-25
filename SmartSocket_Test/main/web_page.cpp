@@ -7,6 +7,25 @@
 const char *welcome_page = "/welcome.html";
 const char *login_page = "/login.html";
 const char *landing_page = "/landing.html";
+const char message[] = R"rawliteral(
+  {"objectId":"%d",
+  "deviceid": "%l",
+  "groupid": "%d",
+  "devicename": "%s",
+  "relay":"%d",
+  "mac":"%s",
+  "ip":"%s",
+  "vrms":"%.2f",
+  "irms":"%.2f",
+  "pf": "%.2f",
+  "freq": "%.2f",
+  "Q": "%.2f",
+  "S":"%.2f",
+  "P":"%.2f",
+  "time":"%d",
+  "measure_active":"%d"
+})rawliteral";
+
 
 char *helper(const char *filename)
 {
@@ -51,7 +70,7 @@ char *getLoginPage()
   return helper(login_page);
 }
 
-char *getMessage()
+const char *getMessage()
 {
-  return "This is a test message";
+  return message;
 }
