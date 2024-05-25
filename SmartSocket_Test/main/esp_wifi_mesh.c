@@ -510,13 +510,13 @@ void start_mdns_service()
     // set default instance
     mdns_instance_name_set("Smart Socket");
 }
-
 void ip_event_handler(void *arg, esp_event_base_t event_base,
                       int32_t event_id, void *event_data)
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     ESP_LOGI(MESH_TAG, "<IP_EVENT_STA_GOT_IP>IP:" IPSTR, IP2STR(&event->ip_info.ip));
     start_mdns_service();
+    //connect_handler();
 }
 
 void start_wifi_mesh()

@@ -28,7 +28,6 @@ static esp_err_t ws_handler(httpd_req_t *req)
     httpd_ws_frame_t ws_pkt;
     uint8_t *buf = NULL;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
-
     // First receive the full ws message
     /* Set max_len = 0 to get the frame len */
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
@@ -137,7 +136,7 @@ esp_err_t send_web_page(httpd_req_t *req, uint8_t page_type)
     {
         page = getWelcomePage();
     }
-    ESP_LOGI("HTTPSEND","Web page size : %d",(int)strlen(page));
+    ESP_LOGI("HTTPSEND", "Web page size : %d", (int)strlen(page));
     response = httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
     if (page)
     {
@@ -253,13 +252,14 @@ static void send_message(void *arg)
     memset(msg, 0, 3 * sizeof(message_data));
     data = getMessage();
     char mac_bytes[6] = {0};
-    esp_wifi_get_mac(WIFI_IF_AP, &mac_bytes);
+    esp_wifi_get_mac(WIFI_IF_STA, &mac_bytes);
 
     int objectid = 2;
     int relay_state = info->relay_state;
-    char mac[] = "aa:bb:cc:dd:ee:ff\0";
-    sprintf(mac, "%x:%x:%x:%x:%x:%x", mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5], mac_bytes[6]);
-    char ip[] = "192.168.4.1\0";
+    char mac[] = "aa:bb:cc:dd:ee:ff";
+    sprintf(mac, "%2x:%2x:%2x:%2x:%2x:%2x", mac_bytes[0], mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
+
+    char ip[] = "192.168.4.1";
     double vrms = info->vrms;
     double Irms = info->irms;
     double pf = info->pf;
@@ -272,9 +272,25 @@ static void send_message(void *arg)
 
     unsigned int time_val = tv_now.tv_usec / 1000;
     uint8_t measure_active = info->consversion_started;
-    sprintf(msg, data, objectid, info->id, 1, "SmartSocket", info->relay_state, mac, ip, vrms, Irms, pf, freq, Q, S, P, (int)time, measure_active);
-    // ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
-    // ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
+    sprintf(msg, data,
+            objectid,
+            info->id,
+            1,
+            "SmartSocket",
+            info->relay_state,
+            mac,
+            ip,
+            vrms,
+            Irms,
+            pf,
+            freq,
+            Q,
+            S,
+            P,
+            (int)time,
+            measure_active);
+    ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
+    ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.payload = (uint8_t *)msg;
     ws_pkt.len = strlen(msg);
@@ -282,8 +298,11 @@ static void send_message(void *arg)
 
     httpd_ws_send_frame_async(hd, fd, &ws_pkt);
     free(resp_arg);
-    free(msg);
-    msg = NULL;
+    if (msg)
+    {
+        free(msg);
+        msg = NULL;
+    }
 }
 
 static void send_ping(void *arg)

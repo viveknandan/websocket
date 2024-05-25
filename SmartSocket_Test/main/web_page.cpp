@@ -9,7 +9,7 @@ const char *login_page = "/spiflash//login.html";
 const char *landing_page = "/spiflash//landing.html";
 const char message[] = R"rawliteral(
   {"objectId":"%d",
-  "deviceid": "%l",
+  "deviceid": "%llu",
   "groupid": "%d",
   "devicename": "%s",
   "relay":"%d",
@@ -34,13 +34,7 @@ uint32_t count_bytes_in_file(FILE* fd)
   {
     /* code */
     ch = getc(fd);
-    if(ch == ' ' || ch == '\n' || ch == '\r')
-    {
-      //ignore
-    }
-    else{
-           i++;
-    }
+i++;
     
     
   } while (!feof(fd));
@@ -75,20 +69,21 @@ char *helper(const char *filename)
   //data = fgets(data, fsize - 1, fd);
   int i = 0;
   char ch;
+
   do
   {
     /* code */
     ch = getc(fd);
-    if( ch == '\n' || ch == '\r')
+  
+    if(feof(fd))
     {
-      //ignore
+      break;
     }
-    else{
-           data[i++] = ch;
+    else
+    {
+    data[i++] = ch;  
     }
-    
-    
-  } while (!feof(fd));
+  } while (1);
   
   ESP_LOGI("EBPAGE","Bytes written to buffer : %d bytes",i);
   return data;

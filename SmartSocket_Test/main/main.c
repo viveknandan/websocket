@@ -649,9 +649,7 @@ void app_main(void)
     ssd1306_display_text(&ssd1306, 1, "Initalized!", 11, false);
 
     // Start WiFi and Webserver
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, IP_EVENT_STA_GOT_IP, &got_ip_handler, &server, NULL));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, IP_EVENT_STA_GOT_IP, &got_ip_handler, &server, NULL));
+    //ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &server, NULL));
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         WIFI_EVENT_STA_CONNECTED,
