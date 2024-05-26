@@ -12,6 +12,7 @@ struct async_resp_arg
 {
     httpd_handle_t hd;
     int fd;
+    SmartSocketInfo* info;
 };
 
 static const char *TAG = "wss_server";
@@ -248,7 +249,8 @@ static void send_message(void *arg)
     int fd = resp_arg->fd;
     httpd_ws_frame_t ws_pkt;
     msg = (char *)malloc(3 * sizeof(message_data) / sizeof(char));
-    SmartSocketInfo *info = getSmartSocketInfo();
+    // SmartSocketInfo *info = getSmartSocketInfo();
+    SmartSocketInfo *info = resp_arg->info;
     memset(msg, 0, 3 * sizeof(message_data));
     data = getMessage();
     char mac_bytes[6] = {0};
@@ -289,15 +291,25 @@ static void send_message(void *arg)
             P,
             (int)time,
             measure_active);
-    ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
-    ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
+    // ESP_LOGI("WEBSOCKET", "Sending message->%s", msg);
+    // ESP_LOGI("WEBSOCKET", "Size = %d, pred: %d", (int)strlen(msg), (int)sizeof(message_data));
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.payload = (uint8_t *)msg;
     ws_pkt.len = strlen(msg);
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
     httpd_ws_send_frame_async(hd, fd, &ws_pkt);
-    free(resp_arg);
+    if (resp_arg)
+    {
+        if(resp_arg->info)
+        {
+            //free(resp_arg->info);
+            resp_arg->info = NULL;
+        }
+        free(resp_arg);
+        resp_arg = NULL;
+    }
+
     if (msg)
     {
         free(msg);
@@ -431,7 +443,7 @@ void connect_handler(void *arg, esp_event_base_t event_base,
 }
 
 // Get all clients and send async message
-void wss_server_send_messages(httpd_handle_t *server)
+void wss_server_send_messages(httpd_handle_t *server, SmartSocketInfo *info)
 {
     bool send_messages = true;
 
@@ -453,6 +465,7 @@ void wss_server_send_messages(httpd_handle_t *server)
                 struct async_resp_arg *resp_arg = malloc(sizeof(struct async_resp_arg));
                 resp_arg->hd = *server;
                 resp_arg->fd = sock;
+                resp_arg->info = info;
                 if (httpd_queue_work(resp_arg->hd, send_message, resp_arg) != ESP_OK)
                 {
                     ESP_LOGE(TAG, "httpd_queue_work failed!");

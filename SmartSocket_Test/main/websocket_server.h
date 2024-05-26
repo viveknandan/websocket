@@ -9,8 +9,9 @@
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
 #include <esp_https_server.h>
+#include "web_page.h"
 
-void wss_server_send_messages(httpd_handle_t *server);
+void wss_server_send_messages(httpd_handle_t *server, SmartSocketInfo* info);
 void connect_handler(void *arg, esp_event_base_t event_base,
                      int32_t event_id, void *event_data);
 void disconnect_handler(void *arg, esp_event_base_t event_base,

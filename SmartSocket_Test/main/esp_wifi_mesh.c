@@ -55,7 +55,62 @@ static esp_netif_t *netif_sta = NULL;
 static QueueHandle_t mesh_child_tx_queue;
 static QueueHandle_t mesh_root_tx_queue;
 
-uint64_t get_system_time_in_us()
+extern void send_smart_socket_info(SmartSocketInfo *info);
+extern void execute_command(uint32_t cmd_id);
+
+static void process_cmd_from_root(ChildCmd_t cmd, char *arg, uint32_t arg_len)
+{
+    ESP_LOGI("MESH","Processing command: %d",(int) cmd);
+    switch (cmd)
+    {
+    case CHILD_CMD_GET_INFO:
+    //Reply to root with node information
+        break;
+    case CHILD_CMD_START_CNV:
+    execute_command(START_MEASURE);
+        break;
+    case CHILD_CMD_STOP_CNV:
+    execute_command(STOP_MEASURE);
+        break;
+    case CHILD_CMD_RELAY:
+    if(arg)
+    {
+        if(arg[0] == 0)
+        {
+            execute_command(RELAY_OFF);
+        }
+        else if(arg[0] == 1)
+        {
+             execute_command(RELAY_ON);
+        }
+    }
+        break;
+    case WEB_PAGE_STATE:
+    //ToDo
+        break;
+    case NEW_USER_ADDED:
+    //ToDo
+        break;
+    case TIME_SYNC:
+    //ToDO
+        break;
+    case USER_REMOVED:
+    //ToDo
+        break;
+    case CHILD_SET_GROUP:
+    //ToDo
+        break;
+    default:
+        break;
+    }
+    if(arg_len > 0 && arg)
+    {
+        free(arg);
+        
+    }
+}
+
+static uint64_t get_system_time_in_us()
 {
     struct timeval tv_now;
     gettimeofday(&tv_now, NULL);
@@ -63,7 +118,7 @@ uint64_t get_system_time_in_us()
     return time_us;
 }
 
-void setTime(uint64_t time)
+static void setTime(uint64_t time)
 {
     struct timeval tv_now;
     tv_now.tv_sec = time / 1000000L;
@@ -71,48 +126,137 @@ void setTime(uint64_t time)
     settimeofday(&tv_now, NULL);
 }
 
-void addUser(char *uname, char *password)
+static void removeUser(char *uname)
 {
-}
-
-void removeUser(char *uname)
-{
+    // remove user from nvm
 }
 
 void send_child_cmd_get_info(void)
 {
+    // Prepare command
+    mesh_smartsocket_ctl_t cmd;
+    cmd.cmd = CHILD_CMD_GET_INFO;
+    cmd.data_len = 0;
+    cmd.group_id = 0;
+
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
 }
 
-void send_child_cmd_start_cnv(void)
+void send_child_cmd_start_cnv(uint64_t devid)
 {
+    // Prepare command
+    uint8_t addr_size = 6;
+    mesh_smartsocket_ctl_t cmd;
+    cmd.cmd = CHILD_CMD_START_CNV;
+    cmd.data_len = 0;
+    cmd.group_id = 0;
+    // Data payload contains device id which is actually a mac address
+    cmd.data = (uint8_t *)malloc(addr_size);
+    fill_buffer(devid, cmd.data, 0, addr_size);
+    cmd.data_len = addr_size;
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
 }
 
-void send_child_cmd_relay(void)
+void send_child_cmd_relay(uint64_t devid, uint8_t state)
 {
+    // Prepare command
+    uint8_t addr_size = 6;
+    mesh_smartsocket_ctl_t cmd;
+    cmd.cmd = CHILD_CMD_RELAY;
+    cmd.data_len = 0;
+    cmd.group_id = 0; // broadcast by default
+    // Data payload contains device id which is actually a mac address
+    cmd.data = (uint8_t *)malloc(addr_size + 1);
+    fill_buffer(devid, cmd.data, 0, addr_size);
+    cmd.data[addr_size] = state;
+    cmd.data_len = addr_size + 1;
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
 }
 void send_child_cmd_page_state(uint8_t session_handle, uint8_t page_state, uint32_t session_time_elapsed_in_ms)
 {
 }
-void send_child_cmd_new_user_added(uint8_t *user_name, uint8_t *password)
+esp_err_t send_child_cmd_new_user_added(uint8_t *user_name, uint8_t *password, bool isadmin)
 {
+    // Prepare command
+    mesh_smartsocket_ctl_t cmd;
+    SmartSocketUser user;
+    static int32_t uid = 1;
+    uint8_t size_data = strlen((char *)user_name);
+    uint8_t size_pass = strlen((char *)password);
+
+    if (!(size_data > 0 && size_data <= MAX_UNAME_LEN))
+    {
+        // Fail
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(user.uname, user_name, size_data);
+    memcpy(user.pass, password, size_pass);
+    user.is_admin = isadmin;
+    user.user_id = uid++;
+    cmd.cmd = NEW_USER_ADDED;
+    cmd.data_len = size_data + size_pass;
+    cmd.group_id = 0;
+    // allocate memory
+    cmd.data = malloc(sizeof(SmartSocketUser));
+    memcpy(cmd.data, &user, sizeof(SmartSocketUser));
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
+    // Save to NVM
+    save_user_info(&user);
+    return ESP_OK;
 }
-void send_child_cmd_time_sysnc( uint64_t local_utc_time)
+
+void send_child_cmd_time_sysnc(uint64_t local_utc_time)
 {
+    // Prepare command
+    mesh_smartsocket_ctl_t cmd;
+    cmd.cmd = TIME_SYNC;
+    cmd.data_len = sizeof(uint64_t);
+    cmd.group_id = 0;
+    // allocate memory
+    cmd.data = malloc(sizeof(uint64_t));
+    // fill data
+    fill_buffer(local_utc_time, cmd.data, 0, sizeof(uint64_t));
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
 }
 void send_child_cmd_user_removed(char *user)
 {
 }
 
-void send_child_cmd_set_group(uint64_t gid)
+void send_child_cmd_set_group(uint64_t devid, uint64_t gid)
 {
+    // Prepare command
+    uint8_t addr_size = 6;
+    uint8_t group_size = 8;
+    mesh_smartsocket_ctl_t cmd;
+    cmd.cmd = CHILD_CMD_START_CNV;
+    cmd.data_len = 0;
+    cmd.group_id = 0;
+    // Data payload contains device id which is actually a mac address
+    cmd.data = (uint8_t *)malloc(addr_size + group_size);
+    fill_buffer(devid, cmd.data, 0, addr_size);
+    fill_buffer(gid, cmd.data, addr_size, group_size);
+    cmd.data_len = addr_size + group_size;
+    // Push command to Tx queue
+    xQueueSend(mesh_root_tx_queue, &cmd, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
 }
 
 void send_root_selfinfo(SmartSocketInfo *info)
 {
+    mesh_smartsocket_info_t linfo;
+    memcpy(&linfo.info, info, sizeof(SmartSocketInfo));
+    xQueueSend(mesh_root_tx_queue, &linfo, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
+    if (info)
+    {
+        free(info);
+    }
 }
 
-mesh_smartsocket_ctl_t mesh_cmd;
-mesh_smartsocket_info_t mesh_dev_info;
+
 
 // mesh_light_ctl_t light_on = {
 //     .cmd = MESH_CONTROL_CMD,
@@ -159,6 +303,8 @@ void esp_mesh_p2p_tx_main(void *arg)
         {
             // Wait for Command to arrive from WebSocket
             xQueueReceive(mesh_root_tx_queue, &mesh_root_cmd, 1000 / portTICK_PERIOD_MS);
+            mesh_root_cmd.header.token_id = MESH_TOKEN_ID;
+            mesh_root_cmd.header.token_value = MESH_TOKEN_VALUE;
             memcpy(data.data, (uint8_t *)&mesh_root_cmd, sizeof(mesh_smartsocket_ctl_t));
             if (mesh_root_cmd.group_id == 0)
             {
@@ -221,22 +367,34 @@ void esp_mesh_p2p_rx_main(void *arg)
             ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
             continue;
         }
-        // /* extract send count */
-        // if (data.size >= sizeof(send_count))
-        // {
-        //     send_count = (data.data[25] << 24) | (data.data[24] << 16) | (data.data[23] << 8) | data.data[22];
-        // }
-        // recv_count++;
-        // /* process light control */
-        // mesh_light_process(&from, data.data, data.size);
-        // if (!(recv_count % 1))
-        // {
-        //     ESP_LOGW(MESH_TAG,
-        //              "[#RX:%d/%d][L:%d] parent:" MACSTR ", receive from " MACSTR ", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
-        //              recv_count, send_count, mesh_layer,
-        //              MAC2STR(mesh_parent_addr.addr), MAC2STR(from.addr),
-        //              data.size, esp_get_minimum_free_heap_size(), flag, err, data.proto,
-        //              data.tos);
+        if (esp_mesh_is_root())
+        {
+            // Receieve smartsocket info from child and send to websockets
+            mesh_smartsocket_info_t *info = (mesh_smartsocket_info_t *)data.data;
+            SmartSocketInfo *smInfo = malloc(sizeof(SmartSocketInfo));
+            memcpy(smInfo, &info->info, sizeof(SmartSocketInfo));
+            send_smart_socket_info(smInfo);
+        }
+        else
+        {
+            // Receieve command from root node and execute.
+            mesh_smartsocket_ctl_t *ctrl_cmd = (mesh_smartsocket_ctl_t *)data.data;
+            char *arg = NULL;
+            if (ctrl_cmd->data_len > 0)
+            {
+                arg = malloc(ctrl_cmd->data_len);
+            }
+
+            process_cmd_from_root(ctrl_cmd->cmd, arg, ctrl_cmd->data_len);
+            // ToDo : Process group Id
+        }
+
+        ESP_LOGW(MESH_TAG,
+                 "[#RX:%d/%d][L:%d] parent:" MACSTR ", receive from " MACSTR ", size:%d, heap:%" PRId32 ", flag:%d[err:0x%x, proto:%d, tos:%d]",
+                 recv_count, send_count, mesh_layer,
+                 MAC2STR(mesh_parent_addr.addr), MAC2STR(from.addr),
+                 data.size, esp_get_minimum_free_heap_size(), flag, err, data.proto,
+                 data.tos);
     }
     vTaskDelete(NULL);
 }
@@ -516,7 +674,7 @@ void ip_event_handler(void *arg, esp_event_base_t event_base,
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     ESP_LOGI(MESH_TAG, "<IP_EVENT_STA_GOT_IP>IP:" IPSTR, IP2STR(&event->ip_info.ip));
     start_mdns_service();
-    //connect_handler();
+    // connect_handler();
 }
 
 void start_wifi_mesh()

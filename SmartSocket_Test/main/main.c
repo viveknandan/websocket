@@ -24,6 +24,7 @@
 #include "math.h"
 #include "esp_wifi_mesh.h"
 #include "diskio_management.h"
+#include "smartsocket_nvs_flash.h"
 
 const double theta_error = -0.33;
 static SSD1306_t ssd1306;
@@ -33,18 +34,6 @@ typedef struct ReadData_
     char data[4];
     uint16_t len;
 } ReadData;
-
-static SmartSocketInfo socketinfo =
-    {
-        0,
-        0,
-        "SmartSocket",
-        0,
-        0,
-        0,
-        0,
-        0,
-        0};
 
 ReadData rx_data;
 
@@ -58,6 +47,7 @@ static QueueHandle_t rxhandle;
 static QueueHandle_t txhandle;
 static QueueHandle_t cs5490handle;
 nvs_handle_t cs_nvshandle;
+static httpd_handle_t server = NULL;
 
 struct uart_data_t
 {
@@ -78,43 +68,12 @@ void init(void)
     uart_driver_install(UART_NUM_1, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
     uart_param_config(UART_NUM_1, &uart_config);
     uart_set_pin(UART_NUM_1, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    //mount disks
+    // mount disks
     mount_disk(FATFS_READONLY_MODE);
 }
-
-int init_nvsflash(nvs_handle_t *nvs_handle_param)
-{
-    // Initialize NVS
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        // NVS partition was truncated and needs to be erased
-        // Retry nvs_flash_init
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-
-    // Open
-    printf("\n");
-    printf("Opening Non-Volatile Storage (NVS) handle... ");
-    err = nvs_open("storage", NVS_READWRITE, nvs_handle_param);
-    if (err != ESP_OK)
-    {
-        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
-        return -1;
-    }
-    else
-    {
-        printf("Done\n");
-        return 0;
-    }
-}
-
-SmartSocketInfo *getSmartSocketInfo()
-{
-    return &socketinfo;
-}
+// Global functions
+void send_smart_socket_info(SmartSocketInfo *info);
+void execute_command(uint32_t cmd_id);
 int sendData(const char *logName, const char *data, const int len)
 {
     const int txBytes = uart_write_bytes(UART_NUM_1, data, len);
@@ -451,7 +410,7 @@ static void cs5490_read_task()
         {
             ESP_LOGI("task_cs5490", "Reading values ...");
             read_device = true;
-            read_delay = socketinfo.data_send_interval * 1000;
+            read_delay = 1000;
             startConversion(true);
             setDOpinFunction(DO_V_ZERO_CROSSING, 0);
             ESP_LOGI("task_cs5490", "Init done");
@@ -459,6 +418,7 @@ static void cs5490_read_task()
         if (read_device)
         {
             ESP_LOGI("task_cs5490", "Reading in progress");
+            SmartSocketInfo *socketinfo = malloc(sizeof(SmartSocketInfo));
             double vrms = readVrms();
             double irms = roundf((readIrms() - 0.35) * 10);
             irms = irms / 10;
@@ -472,14 +432,16 @@ static void cs5490_read_task()
             double reactivepower = vrms * irms * sin(acosl(pf));
             double freq = readFreq();
             ESP_LOGI("CS5490", "Vrms = %f, Irms = %f, activeP = %f, Pf = %f, apparantP = %f, reactiveP = %f, freq = %f", vrms, irms, activepower, pf, apparantpower, reactivepower, freq);
-            socketinfo.vrms = vrms;
-            socketinfo.irms = irms;
-            socketinfo.freq = freq;
-            socketinfo.P = apparantpower;
-            socketinfo.Q = reactivepower;
-            socketinfo.S = activepower;
-            socketinfo.pf = pf;
-            socketinfo.consversion_started = 1;
+            socketinfo->vrms = vrms;
+            socketinfo->irms = irms;
+            socketinfo->freq = freq;
+            socketinfo->P = apparantpower;
+            socketinfo->Q = reactivepower;
+            socketinfo->S = activepower;
+            socketinfo->pf = pf;
+            socketinfo->consversion_started = 1;
+            socketinfo->relay_state = gpio_get_level(GPIO_NUM_10);
+            send_smart_socket_info(socketinfo);
             memset(display, 0, 30);
             sprintf(display, displayf, "V ", vrms);
             ssd1306_display_text(&ssd1306, 1, display, 30, false);
@@ -509,6 +471,66 @@ void start_uart_tasks()
     rxhandle = xQueueCreate(10, sizeof(ReadData));
     xTaskCreate(rx_task, "uart_rx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 2, NULL);
     xTaskCreate(tx_task, "uart_tx_task", 1024 * 2, NULL, configMAX_PRIORITIES - 3, NULL);
+}
+
+void execute_command(uint32_t cmd_id)
+{
+    switch ((Commands)cmd_id)
+    {
+    case RELAY_ON:
+        ESP_LOGI("ProcessMsg", "Setting relay ON!");
+        gpio_set_level(GPIO_NUM_10, 1);
+        break;
+    case RELAY_OFF:
+        ESP_LOGI("ProcessMsg", "Setting relay OFF!");
+        gpio_set_level(GPIO_NUM_10, 0);
+        break;
+    case START_MEASURE:
+    {
+        ESP_LOGI("ProcessMsg", "Start measure!");
+        uint8_t task_cmd_start = 1;
+        uint8_t task_cmd_update_delay = 3;
+        // socketinfo.data_send_interval = (uint32_t)strtol(cmd.arg[0].arg, &ptr, 10);
+        // if (socketinfo.data_send_interval >= 1)
+        //{
+        //  xQueueSend(cs5490handle,&task_cmd_update_delay,0);
+        xQueueSend(cs5490handle, &task_cmd_start, 0);
+        //}
+        // xQueueSend(cs5490handle,&task_cmd_start,0);
+        // ESP_LOGI("ProcessMessage", "Interval set to :%d", (int)socketinfo->data_send_interval);
+    }
+    break;
+    case STOP_MEASURE:
+    {
+        uint8_t task_cmd_stop = 0;
+       // if (socketinfo->consversion_started == 1)
+       // {
+            // Reset CS5490
+            xQueueSend(cs5490handle, &task_cmd_stop, 0);
+            CS5490_hwreset();
+            //socketinfo.consversion_started = 0;
+       // }
+
+        ESP_LOGI("ProcessMessage", "Conversion is stopped. CS5490 is reset.");
+    }
+    break;
+        break;
+    case SET_TIME:
+        break;
+    case START_LOG:
+        break;
+    case STOP_LOG:
+        break;
+    case DISCOVER:
+        // Return list of devices in the mesh network
+        // Applicable to root node only
+        break;
+    case SELECTDEVICE:
+        // Broadcast command to device over mesh network
+        break;
+    default:
+        break;
+    }
 }
 void SmartSocket_ProcessMessage(const char *msg)
 {
@@ -563,72 +585,28 @@ const Commands = Object.freeze({
     }
     cmd_id = strtol(cmd.id, &ptr, 10);
     ESP_LOGI("ProcessMsg", "Command recieved:%s -> %d", (char *)cmd.id, (int)cmd_id);
-    switch ((Commands)cmd_id)
-    {
-    case RELAY_ON:
-        ESP_LOGI("ProcessMsg", "Setting relay ON!");
-        gpio_set_level(GPIO_NUM_10, 1);
-        break;
-    case RELAY_OFF:
-        ESP_LOGI("ProcessMsg", "Setting relay OFF!");
-        gpio_set_level(GPIO_NUM_10, 0);
-        break;
-    case START_MEASURE:
-    {
-        ESP_LOGI("ProcessMsg", "Start measure!");
-        uint8_t task_cmd_start = 1;
-        uint8_t task_cmd_update_delay = 3;
-        socketinfo.data_send_interval = (uint32_t)strtol(cmd.arg[0].arg, &ptr, 10);
-        if (socketinfo.data_send_interval >= 1)
-        {
-            // xQueueSend(cs5490handle,&task_cmd_update_delay,0);
-            xQueueSend(cs5490handle, &task_cmd_start, 0);
-        }
-        // xQueueSend(cs5490handle,&task_cmd_start,0);
-        ESP_LOGI("ProcessMessage", "Interval set to :%d", (int)socketinfo.data_send_interval);
-    }
-    break;
-    case STOP_MEASURE:
-    {
-        uint8_t task_cmd_stop = 0;
-        if (socketinfo.consversion_started == 1)
-        {
-            // Reset CS5490
-            xQueueSend(cs5490handle, &task_cmd_stop, 0);
-            CS5490_hwreset();
-            socketinfo.consversion_started = 0;
-        }
-
-        ESP_LOGI("ProcessMessage", "Conversion is stopped. CS5490 is reset:%d", (int)socketinfo.data_send_interval);
-    }
-    break;
-        break;
-    case SET_TIME:
-        break;
-    case START_LOG:
-        break;
-    case STOP_LOG:
-        break;
-    case DISCOVER:
-        // Return list of devices in the mesh network
-        // Applicable to root node only
-        break;
-    case SELECTDEVICE:
-        // Broadcast command to device over mesh network
-        break;
-    default:
-        break;
-    }
+    execute_command(cmd_id);
 
     free_web_command(cmd);
 }
 
+void send_smart_socket_info(SmartSocketInfo *info)
+{
+    if (!esp_mesh_is_root())
+    {
+        // Child node sends info to root node
+        send_root_selfinfo(info);
+    }
+    else
+    {
+        // Root node always sends info to websocket
+        wss_server_send_messages(&server, info);
+    }
+}
 void app_main(void)
 {
 
     int level = 0;
-
-    static httpd_handle_t server = NULL;
     init_nvsflash(&cs_nvshandle);
     // ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
@@ -649,7 +627,7 @@ void app_main(void)
     ssd1306_display_text(&ssd1306, 1, "Initalized!", 11, false);
 
     // Start WiFi and Webserver
-    //ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &server, NULL));
+    // ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &server, NULL));
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         WIFI_EVENT_STA_CONNECTED,
@@ -663,8 +641,16 @@ void app_main(void)
 
     while (1)
     {
-        socketinfo.relay_state = gpio_get_level(GPIO_NUM_10);
+        //Measurement will automatically start if Relay is switched ON
+        if (gpio_get_level(GPIO_NUM_10))
+        {
+            execute_command(START_MEASURE);
+        }
+        else
+        {
+            execute_command(STOP_MEASURE);
+        }
+
         vTaskDelay(1000 / portTICK_PERIOD_MS);
-        wss_server_send_messages(&server);
     }
 }

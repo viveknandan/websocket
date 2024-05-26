@@ -7,6 +7,12 @@
 const char *welcome_page = "/spiflash/welcome.html";
 const char *login_page = "/spiflash//login.html";
 const char *landing_page = "/spiflash//landing.html";
+const char response[] = R"rawliteral({
+  "objectId": "%d",
+  "resp" : "%d",
+  "result" :"%s"
+})rawliteral";
+
 const char message[] = R"rawliteral(
   {"objectId":"%d",
   "deviceid": "%llu",
