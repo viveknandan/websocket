@@ -5,8 +5,9 @@
 #include <sys/stat.h>
 #include "esp_log.h"
 const char *welcome_page = "/spiflash/welcome.html";
-const char *login_page = "/spiflash//login.html";
-const char *landing_page = "/spiflash//landing.html";
+const char *login_page = "/spiflash/login.html";
+const char *landing_page = "/spiflash/landing.html";
+const char *basepath = "/spiflash/";
 const char response[] = R"rawliteral({
   "objectId": "%d",
   "resp" : "%d",
@@ -32,7 +33,7 @@ const char message[] = R"rawliteral(
   "measure_active":"%d"
 })rawliteral";
 
-uint32_t count_bytes_in_file(FILE* fd)
+uint32_t count_bytes_in_file(FILE *fd)
 {
   int i = 0;
   char ch;
@@ -40,11 +41,10 @@ uint32_t count_bytes_in_file(FILE* fd)
   {
     /* code */
     ch = getc(fd);
-i++;
-    
-    
+    i++;
+
   } while (!feof(fd));
-  fseek(fd,0,SEEK_SET);
+  fseek(fd, 0, SEEK_SET);
   return i;
 }
 char *helper(const char *filename)
@@ -61,18 +61,18 @@ char *helper(const char *filename)
     return data;
   }
   FILE *fd = fopen(filename, "r");
-  //fsize = (long long)sb.st_size + 1;
-  fsize = count_bytes_in_file(fd)+1;
+  // fsize = (long long)sb.st_size + 1;
+  fsize = count_bytes_in_file(fd) + 1;
   data = (char *)malloc(fsize);
   memset(data, 0, fsize);
-  ESP_LOGI("EBPAGE","Bytes from file : %d bytes",(int)fsize);
+  ESP_LOGI("EBPAGE", "Bytes from file : %d bytes", (int)fsize);
   if (fd == NULL)
   {
     data = (char *)malloc(fsize);
     strncpy(data, error_string, fsize);
     return data;
   }
-  //data = fgets(data, fsize - 1, fd);
+  // data = fgets(data, fsize - 1, fd);
   int i = 0;
   char ch;
 
@@ -80,18 +80,18 @@ char *helper(const char *filename)
   {
     /* code */
     ch = getc(fd);
-  
-    if(feof(fd))
+
+    if (feof(fd))
     {
       break;
     }
     else
     {
-    data[i++] = ch;  
+      data[i++] = ch;
     }
   } while (1);
-  
-  ESP_LOGI("EBPAGE","Bytes written to buffer : %d bytes",i);
+
+  ESP_LOGI("EBPAGE", "Bytes written to buffer : %d bytes", i);
   return data;
 }
 
@@ -114,4 +114,28 @@ char *getLoginPage()
 const char *getMessage()
 {
   return message;
+}
+
+char *getFile(char *filename)
+{
+  char *file_path = NULL;
+  char *data = NULL;
+  uint8_t uri_path_len = 0;
+  if (filename)
+  {
+    uri_path_len = strlen(basepath) + strlen(filename) + 1;
+    file_path = (char*)malloc(uri_path_len);
+    memset(file_path, 0, uri_path_len);
+    strncat(file_path, basepath, uri_path_len);
+    strncat(file_path, filename, uri_path_len);
+    ESP_LOGI("WEBPAGE", "Requesting file: %s", file_path);
+  }
+  data = helper(file_path);
+  if (file_path)
+  {
+    free(file_path);
+    file_path = NULL;
+  }
+
+  return (data);
 }

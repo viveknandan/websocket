@@ -9,6 +9,7 @@ char* getLandingPage();
 char* getWelcomePage();
 char* getLoginPage();
 const char* getMessage();
+char *getFile(char *filename);
 
 typedef enum 
 {

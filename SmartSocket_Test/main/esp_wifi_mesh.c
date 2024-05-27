@@ -372,6 +372,7 @@ void esp_mesh_p2p_rx_main(void *arg)
             // Receieve smartsocket info from child and send to websockets
             mesh_smartsocket_info_t *info = (mesh_smartsocket_info_t *)data.data;
             SmartSocketInfo *smInfo = malloc(sizeof(SmartSocketInfo));
+            memset(smInfo,0,sizeof(SmartSocketInfo));
             memcpy(smInfo, &info->info, sizeof(SmartSocketInfo));
             send_smart_socket_info(smInfo);
         }

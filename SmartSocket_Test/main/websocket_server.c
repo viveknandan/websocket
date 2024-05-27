@@ -12,7 +12,7 @@ struct async_resp_arg
 {
     httpd_handle_t hd;
     int fd;
-    SmartSocketInfo* info;
+    SmartSocketInfo *info;
 };
 
 static const char *TAG = "wss_server";
@@ -147,6 +147,38 @@ esp_err_t send_web_page(httpd_req_t *req, uint8_t page_type)
     return response;
 }
 
+/* Copies the full path into destination buffer and returns
+ * pointer to path (skipping the preceding base path) */
+static const char *get_path_from_uri(char *dest, const char *basepath, const char *uri, size_t destsize)
+{
+    const size_t base_pathlen = strlen(basepath);
+    size_t pathlen = strlen(uri);
+
+    const char *quest = strchr(uri, '?');
+    if (quest)
+    {
+        pathlen = MIN(pathlen, quest - uri);
+    }
+    const char *hash = strchr(uri, '#');
+    if (hash)
+    {
+        pathlen = MIN(pathlen, hash - uri);
+    }
+
+    if (base_pathlen + pathlen + 1 > destsize)
+    {
+        /* Full path string won't fit into destination buffer */
+        return NULL;
+    }
+
+    /* Construct full path (base + path) */
+    strcpy(dest, basepath);
+    strlcpy(dest + base_pathlen, uri, pathlen + 1);
+
+    /* Return pointer to path, skipping the base */
+    return dest + base_pathlen;
+}
+
 static esp_err_t get_req_handler(httpd_req_t *req)
 {
     return send_web_page(req, 0);
@@ -163,36 +195,31 @@ static esp_err_t status_req_handler(httpd_req_t *req)
 
 static esp_err_t post_handler(httpd_req_t *req)
 {
-    /* Destination buffer for content of HTTP POST request.
-     * httpd_req_recv() accepts char* only, but content could
-     * as well be any binary data (needs type casting).
-     * In case of string data, null termination will be absent, and
-     * content length would give length of string */
-    char content[100];
+    return ESP_OK;
+}
+static esp_err_t download_get_handler(httpd_req_t *req)
+{
+    char filepath[128];
+    FILE *fd = NULL;
+    struct stat file_stat;
 
-    /* Truncate if content length larger than the buffer */
-    size_t recv_size = MIN(req->content_len, sizeof(content));
-
-    int ret = httpd_req_recv(req, content, recv_size);
-    if (ret <= 0)
-    { /* 0 return value indicates connection closed */
-        /* Check if timeout occurred */
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
-        {
-            /* In case of timeout one can choose to retry calling
-             * httpd_req_recv(), but to keep it simple, here we
-             * respond with an HTTP 408 (Request Timeout) error */
-            httpd_resp_send_408(req);
-        }
-        /* In case of error, returning ESP_FAIL will
-         * ensure that the underlying socket is closed */
+    const char *filename = get_path_from_uri(filepath, "/",
+                                             req->uri, sizeof(filepath));
+    if (!filename)
+    {
+        ESP_LOGE(TAG, "Filename is too long");
+        /* Respond with 500 Internal Server Error */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
         return ESP_FAIL;
     }
+
+    char *data = getFile(filename);
 
     /* Send a simple response */
     // ToDo: Authenticate and Manage user sessions
     const char resp[] = "user-session-id";
-    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, data, HTTPD_RESP_USE_STRLEN);
+    free(data);
     return ESP_OK;
 }
 static const httpd_uri_t ws = {
@@ -236,6 +263,17 @@ httpd_uri_t uri_post = {
     .method = HTTP_POST,
     .handler = post_handler,
     .user_ctx = NULL};
+
+/* URI handler for getting uploaded files */
+httpd_uri_t uri_file_download = {
+    .uri = "/*", // Match all URIs of type /path/to/file
+    .method = HTTP_GET,
+    .handler = download_get_handler,
+    .user_ctx = NULL, // Pass server data as context
+    .is_websocket = false,
+    .handle_ws_control_frames = false,
+};
+
 static void send_device_info(void *arg)
 {
 }
@@ -301,9 +339,9 @@ static void send_message(void *arg)
     httpd_ws_send_frame_async(hd, fd, &ws_pkt);
     if (resp_arg)
     {
-        if(resp_arg->info)
+        if (resp_arg->info)
         {
-            //free(resp_arg->info);
+            // free(resp_arg->info);
             resp_arg->info = NULL;
         }
         free(resp_arg);
@@ -370,7 +408,7 @@ int start_wss_smartplug_server(void)
     conf.httpd.global_user_ctx = keep_alive;
     conf.httpd.open_fn = wss_open_fd;
     conf.httpd.close_fn = wss_close_fd;
-
+    conf.httpd.uri_match_fn = httpd_uri_match_wildcard;
     extern const unsigned char servercert_start[] asm("_binary_servercert_pem_start");
     extern const unsigned char servercert_end[] asm("_binary_servercert_pem_end");
     conf.servercert = servercert_start;
@@ -391,9 +429,11 @@ int start_wss_smartplug_server(void)
     // Set URI handlers
     ESP_LOGI(TAG, "Registering URI handlers");
     httpd_register_uri_handler(server, &ws);
+    httpd_register_uri_handler(server, &uri_file_download);
     httpd_register_uri_handler(server, &uri_get);
     httpd_register_uri_handler(server, &uri_login);
     httpd_register_uri_handler(server, &uri_welcome);
+
     wss_keep_alive_set_user_ctx(keep_alive, server);
     return server;
 }

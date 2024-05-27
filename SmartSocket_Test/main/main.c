@@ -27,6 +27,7 @@
 #include "smartsocket_nvs_flash.h"
 
 const double theta_error = -0.33;
+const double delta_irms_error = 0.35;
 static SSD1306_t ssd1306;
 ;
 typedef struct ReadData_
@@ -420,7 +421,7 @@ static void cs5490_read_task()
             ESP_LOGI("task_cs5490", "Reading in progress");
             SmartSocketInfo *socketinfo = malloc(sizeof(SmartSocketInfo));
             double vrms = readVrms();
-            double irms = roundf((readIrms() - 0.35) * 10);
+            double irms = roundf((readIrms() - delta_irms_error) * 10);
             irms = irms / 10;
             double pf = readPf();
             if (irms == 0)
@@ -592,6 +593,13 @@ const Commands = Object.freeze({
 
 void send_smart_socket_info(SmartSocketInfo *info)
 {
+    uint8_t mac_bytes[6] = {0};
+    uint64_t devid = 0;
+     esp_wifi_get_mac(WIFI_IF_STA, &mac_bytes);
+    devid = convert_mac_to_u64(mac_bytes);
+    info->id = devid;
+    info->data_send_interval = 1;
+    memcpy(info->name,"SmartSocket\0",13);
     if (!esp_mesh_is_root())
     {
         // Child node sends info to root node
@@ -599,7 +607,7 @@ void send_smart_socket_info(SmartSocketInfo *info)
     }
     else
     {
-        // Root node always sends info to websocket
+        // Root nod e always sends info to websocket
         wss_server_send_messages(&server, info);
     }
 }
