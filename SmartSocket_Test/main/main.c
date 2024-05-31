@@ -49,7 +49,7 @@ static QueueHandle_t txhandle;
 static QueueHandle_t cs5490handle;
 nvs_handle_t cs_nvshandle;
 static httpd_handle_t server = NULL;
-
+static uint64_t select_device_addr = 0;
 struct uart_data_t
 {
     char *data;
@@ -476,6 +476,10 @@ void start_uart_tasks()
 
 void execute_command(uint32_t cmd_id)
 {
+    // char mac_bytes[6] = {0};
+    // esp_wifi_get_mac(WIFI_IF_STA, &mac_bytes);
+    // uint64_t self_device_id = convert_mac_to_u64(mac_bytes);
+    // static uint64_t dest_dev_id = 0;
     switch ((Commands)cmd_id)
     {
     case RELAY_ON:
@@ -504,13 +508,13 @@ void execute_command(uint32_t cmd_id)
     case STOP_MEASURE:
     {
         uint8_t task_cmd_stop = 0;
-       // if (socketinfo->consversion_started == 1)
-       // {
-            // Reset CS5490
-            xQueueSend(cs5490handle, &task_cmd_stop, 0);
-            CS5490_hwreset();
-            //socketinfo.consversion_started = 0;
-       // }
+        // if (socketinfo->consversion_started == 1)
+        // {
+        // Reset CS5490
+        xQueueSend(cs5490handle, &task_cmd_stop, 0);
+        CS5490_hwreset();
+        // socketinfo.consversion_started = 0;
+        // }
 
         ESP_LOGI("ProcessMessage", "Conversion is stopped. CS5490 is reset.");
     }
@@ -528,6 +532,7 @@ void execute_command(uint32_t cmd_id)
         break;
     case SELECTDEVICE:
         // Broadcast command to device over mesh network
+        ESP_LOGI("WEBPAGE","Receieved command Select Device");
         break;
     default:
         break;
@@ -586,6 +591,15 @@ const Commands = Object.freeze({
     }
     cmd_id = strtol(cmd.id, &ptr, 10);
     ESP_LOGI("ProcessMsg", "Command recieved:%s -> %d", (char *)cmd.id, (int)cmd_id);
+    if(cmd_id == DISCOVER)
+    {
+        
+    }
+    if(cmd_id == SELECTDEVICE)
+    {
+        select_device_addr = (uint64_t)strtol(cmd.arg[0].arg, &ptr, 10);
+        ESP_LOGI("WEBPAGE","Select Device: %lu",(unsigned long int)(select_device_addr));
+    }
     execute_command(cmd_id);
 
     free_web_command(cmd);
@@ -593,13 +607,9 @@ const Commands = Object.freeze({
 
 void send_smart_socket_info(SmartSocketInfo *info)
 {
-    uint8_t mac_bytes[6] = {0};
-    uint64_t devid = 0;
-     esp_wifi_get_mac(WIFI_IF_STA, &mac_bytes);
-    devid = convert_mac_to_u64(mac_bytes);
-    info->id = devid;
+
     info->data_send_interval = 1;
-    memcpy(info->name,"SmartSocket\0",13);
+    memcpy(info->name, "SmartSocket\0", 13);
     if (!esp_mesh_is_root())
     {
         // Child node sends info to root node
@@ -607,7 +617,7 @@ void send_smart_socket_info(SmartSocketInfo *info)
     }
     else
     {
-        // Root nod e always sends info to websocket
+        // Root node always sends info to websocket
         wss_server_send_messages(&server, info);
     }
 }
@@ -646,19 +656,19 @@ void app_main(void)
                                                         &disconnect_handler, &server,
                                                         NULL));
     start_wifi_mesh();
-
+    execute_command(START_MEASURE);
     while (1)
     {
-        //Measurement will automatically start if Relay is switched ON
-        if (gpio_get_level(GPIO_NUM_10))
-        {
-            execute_command(START_MEASURE);
-        }
-        else
-        {
-            execute_command(STOP_MEASURE);
-        }
+        // //Measurement will automatically start if Relay is switched ON
+        // if (gpio_get_level(GPIO_NUM_10))
+        // {
+        //     execute_command(START_MEASURE);
+        // }
+        // else
+        // {
+        //     execute_command(STOP_MEASURE);
+        // }
 
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }

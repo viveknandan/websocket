@@ -3,6 +3,8 @@
 
 #include "websocket_server.h"
 #include "web_page.h"
+#include "freertos/semphr.h"
+SemaphoreHandle_t xSemaphore = NULL;
 extern void wifi_init_softap(void);
 #if !CONFIG_HTTPD_WS_SUPPORT
 #error This needs HTTPD_WS_SUPPORT is enabled in esp-http-server component configuration
@@ -195,6 +197,35 @@ static esp_err_t status_req_handler(httpd_req_t *req)
 
 static esp_err_t post_handler(httpd_req_t *req)
 {
+    /* Destination buffer for content of HTTP POST request.
+     * httpd_req_recv() accepts char* only, but content could
+     * as well be any binary data (needs type casting).
+     * In case of string data, null termination will be absent, and
+     * content length would give length of string */
+    char content[100];
+
+    /* Truncate if content length larger than the buffer */
+    size_t recv_size = MIN(req->content_len, sizeof(content));
+
+    int ret = httpd_req_recv(req, content, recv_size);
+    if (ret <= 0)
+    { /* 0 return value indicates connection closed */
+        /* Check if timeout occurred */
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT)
+        {
+            /* In case of timeout one can choose to retry calling
+             * httpd_req_recv(), but to keep it simple, here we
+             * respond with an HTTP 408 (Request Timeout) error */
+            httpd_resp_send_408(req);
+        }
+        /* In case of error, returning ESP_FAIL will
+         * ensure that the underlying socket is closed */
+        return ESP_FAIL;
+    }
+
+    /* Send a simple response */
+    const char resp[] = "URI POST Response";
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 static esp_err_t download_get_handler(httpd_req_t *req)
@@ -203,7 +234,7 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     FILE *fd = NULL;
     struct stat file_stat;
 
-    const char *filename = get_path_from_uri(filepath, "/",
+    const char *filename = get_path_from_uri(filepath, "/webapp",
                                              req->uri, sizeof(filepath));
     if (!filename)
     {
@@ -213,17 +244,26 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char *data = getFile(filename);
-
     /* Send a simple response */
     // ToDo: Authenticate and Manage user sessions
-    const char resp[] = "user-session-id";
-    httpd_resp_send(req, data, HTTPD_RESP_USE_STRLEN);
-    free(data);
+    if (xSemaphore == NULL)
+    {
+        xSemaphore = xSemaphoreCreateMutex();
+    }
+    ESP_LOGI("WEBPAGE", "Mutex taken .. trying");
+    if (xSemaphoreTake(xSemaphore, portMAX_DELAY))
+    {
+        ESP_LOGI("WEBPAGE", "Mutex taken");
+        send_file_page(req, filename);
+
+        xSemaphoreGive(xSemaphore);
+        ESP_LOGI("WEBPAGE", "Mutex returned");
+    }
+
     return ESP_OK;
 }
 static const httpd_uri_t ws = {
-    .uri = "/ws",
+    .uri = "/ws*",
     .method = HTTP_GET,
     .handler = ws_handler,
     .user_ctx = NULL,
@@ -249,7 +289,7 @@ static const httpd_uri_t uri_login = {
 };
 
 static const httpd_uri_t uri_welcome = {
-    .uri = "/welcome",
+    .uri = "/welcome*",
     .method = HTTP_GET,
     .handler = status_req_handler,
     .user_ctx = NULL,
@@ -262,11 +302,13 @@ httpd_uri_t uri_post = {
     .uri = "/auth",
     .method = HTTP_POST,
     .handler = post_handler,
-    .user_ctx = NULL};
+    .user_ctx = NULL,
+    .is_websocket = false,
+    .handle_ws_control_frames = false};
 
 /* URI handler for getting uploaded files */
 httpd_uri_t uri_file_download = {
-    .uri = "/*", // Match all URIs of type /path/to/file
+    .uri = "/webapp/*", // Match all URIs of type /path/to/file
     .method = HTTP_GET,
     .handler = download_get_handler,
     .user_ctx = NULL, // Pass server data as context
@@ -299,7 +341,7 @@ static void send_message(void *arg)
     char mac[] = "aa:bb:cc:dd:ee:ff";
     sprintf(mac, "%2x:%2x:%2x:%2x:%2x:%2x", mac_bytes[0], mac_bytes[1], mac_bytes[2], mac_bytes[3], mac_bytes[4], mac_bytes[5]);
 
-    char ip[] = "192.168.4.1";
+    char ip[] = "https://smartsocket";
     double vrms = info->vrms;
     double Irms = info->irms;
     double pf = info->pf;

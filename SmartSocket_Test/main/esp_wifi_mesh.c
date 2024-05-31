@@ -60,53 +60,52 @@ extern void execute_command(uint32_t cmd_id);
 
 static void process_cmd_from_root(ChildCmd_t cmd, char *arg, uint32_t arg_len)
 {
-    ESP_LOGI("MESH","Processing command: %d",(int) cmd);
+    ESP_LOGI("MESH", "Processing command: %d", (int)cmd);
     switch (cmd)
     {
     case CHILD_CMD_GET_INFO:
-    //Reply to root with node information
+        // Reply to root with node information
         break;
     case CHILD_CMD_START_CNV:
-    execute_command(START_MEASURE);
+        execute_command(START_MEASURE);
         break;
     case CHILD_CMD_STOP_CNV:
-    execute_command(STOP_MEASURE);
+        execute_command(STOP_MEASURE);
         break;
     case CHILD_CMD_RELAY:
-    if(arg)
-    {
-        if(arg[0] == 0)
+        if (arg)
         {
-            execute_command(RELAY_OFF);
+            if (arg[0] == 0)
+            {
+                execute_command(RELAY_OFF);
+            }
+            else if (arg[0] == 1)
+            {
+                execute_command(RELAY_ON);
+            }
         }
-        else if(arg[0] == 1)
-        {
-             execute_command(RELAY_ON);
-        }
-    }
         break;
     case WEB_PAGE_STATE:
-    //ToDo
+        // ToDo
         break;
     case NEW_USER_ADDED:
-    //ToDo
+        // ToDo
         break;
     case TIME_SYNC:
-    //ToDO
+        // ToDO
         break;
     case USER_REMOVED:
-    //ToDo
+        // ToDo
         break;
     case CHILD_SET_GROUP:
-    //ToDo
+        // ToDo
         break;
     default:
         break;
     }
-    if(arg_len > 0 && arg)
+    if (arg_len > 0 && arg)
     {
         free(arg);
-        
     }
 }
 
@@ -249,14 +248,13 @@ void send_root_selfinfo(SmartSocketInfo *info)
 {
     mesh_smartsocket_info_t linfo;
     memcpy(&linfo.info, info, sizeof(SmartSocketInfo));
-    xQueueSend(mesh_root_tx_queue, &linfo, CMD_WAIT_TIME_MS / portTICK_PERIOD_MS);
+    ESP_LOGI("CHILD", "Sending message to root node");
+    xQueueSend(mesh_child_tx_queue, &linfo, 0);
     if (info)
     {
         free(info);
     }
 }
-
-
 
 // mesh_light_ctl_t light_on = {
 //     .cmd = MESH_CONTROL_CMD,
@@ -331,8 +329,10 @@ void esp_mesh_p2p_tx_main(void *arg)
             //  ESP_LOGI(MESH_TAG, "layer:%d, rtableSize:%d, %s", mesh_layer,
             //           esp_mesh_get_routing_table_size(),
             //           (is_mesh_connected && esp_mesh_is_root()) ? "ROOT" : is_mesh_connected ? "NODE"
-            //                                                                                  : "DISCONNECT");
-            xQueueReceive(mesh_child_tx_queue, &smartsocket_info, 1000 / portTICK_PERIOD_MS);
+            //
+            ESP_LOGE(MESH_TAG, "Waiting to tx data");
+            xQueueReceive(mesh_child_tx_queue, &smartsocket_info, portMAX_DELAY);
+            ESP_LOGE(MESH_TAG, "Transmit data to root node.");
             memcpy(data.data, (uint8_t *)&smartsocket_info, sizeof(mesh_smartsocket_info_t));
             err = esp_mesh_send(NULL, &data, MESH_DATA_P2P, NULL, 0);
         }
@@ -362,9 +362,9 @@ void esp_mesh_p2p_rx_main(void *arg)
     {
         data.size = RX_SIZE;
         err = esp_mesh_recv(&from, &data, portMAX_DELAY, &flag, NULL, 0);
+        ESP_LOGE(MESH_TAG, "Received data from mesh err:0x%x, size:%d", err, data.size);
         if (err != ESP_OK || !data.size)
         {
-            ESP_LOGE(MESH_TAG, "err:0x%x, size:%d", err, data.size);
             continue;
         }
         if (esp_mesh_is_root())
@@ -372,8 +372,10 @@ void esp_mesh_p2p_rx_main(void *arg)
             // Receieve smartsocket info from child and send to websockets
             mesh_smartsocket_info_t *info = (mesh_smartsocket_info_t *)data.data;
             SmartSocketInfo *smInfo = malloc(sizeof(SmartSocketInfo));
-            memset(smInfo,0,sizeof(SmartSocketInfo));
+            memset(smInfo, 0, sizeof(SmartSocketInfo));
             memcpy(smInfo, &info->info, sizeof(SmartSocketInfo));
+            //Get src address
+            smInfo->id = convert_mac_to_u64(from.addr);
             send_smart_socket_info(smInfo);
         }
         else
@@ -506,9 +508,8 @@ void mesh_event_handler(void *arg, esp_event_base_t event_base,
                 // Only a new device will be added. Group is zero if it is a new device.
                 add_device(convert_mac_to_u64(route_table[i].addr), 0);
             }
-
-            esp_mesh_comm_p2p_start();
         }
+        esp_mesh_comm_p2p_start();
     }
     break;
     case MESH_EVENT_PARENT_DISCONNECTED:

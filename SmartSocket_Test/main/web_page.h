@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "esp_http_server.h"
 #ifdef __cplusplus
 extern "C"
 {
@@ -8,6 +9,7 @@ extern "C"
 char* getLandingPage();
 char* getWelcomePage();
 char* getLoginPage();
+void send_file_page(httpd_req_t *req,const char* filename);
 const char* getMessage();
 char *getFile(char *filename);
 
