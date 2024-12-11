@@ -27,7 +27,7 @@
 #include "smartsocket_nvs_flash.h"
 
 const double theta_error = -0.33;
-const double delta_irms_error = 0.35;
+const double delta_irms_error = 0.30;
 static SSD1306_t ssd1306;
 ;
 typedef struct ReadData_
@@ -383,8 +383,11 @@ static void rx_task(void *arg)
                     rx_data.len = i + 1;
                 }
             }
-            // ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+            //ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
             xQueueSend(rxhandle, &rx_data, 0);
+        }
+        else{
+           // ESP_LOGE("cs5490_rx","Timeout reading on uart");
         }
     }
     free(data);
@@ -400,6 +403,8 @@ static void cs5490_read_task()
     bool read_device = false;
     const char displayf[] = "%s: %.2f";
     static char display[30];
+
+    //CS5490_Test(true);
     while (1)
     {
         xQueueReceive(cs5490handle, &cmd, 100 / portTICK_PERIOD_MS);
