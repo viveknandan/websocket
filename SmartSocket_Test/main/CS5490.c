@@ -67,7 +67,7 @@ uint8_t getRegisterCount()
 }
 CS5490Register *getRegisters()
 {
-    return &cs5490_register;
+    return cs5490_register;
 }
 
 double CS5490_toDouble(int LSBpow, int MSBoption, uint32_t buffer)

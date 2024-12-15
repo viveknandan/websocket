@@ -252,7 +252,7 @@ static void send_message(void *arg)
     memset(msg, 0, 3 * sizeof(message_data));
     data = getMessage();
     char mac_bytes[6] = {0};
-    esp_wifi_get_mac(WIFI_IF_STA, &mac_bytes);
+    esp_wifi_get_mac(WIFI_IF_STA, (uint8_t*)&mac_bytes[0]);
 
     int objectid = 2;
     int relay_state = info->relay_state;
@@ -341,7 +341,7 @@ bool check_client_alive_cb(wss_keep_alive_t h, int fd)
     return false;
 }
 
-int start_wss_smartplug_server(void)
+void* start_wss_smartplug_server(void)
 {
     // Prepare keep-alive engine
     wss_keep_alive_config_t keep_alive_config = KEEP_ALIVE_CONFIG_DEFAULT();

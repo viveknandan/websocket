@@ -11,7 +11,7 @@ enum NvsKey
     KEY_DEV_ID,
     KEY_DEV_GID
 };
-const char **keys_lookup =
+const char *keys_lookup[] =
     {
         "uid_off",  // user id offset
         "utab_v",   // Usertable valid flag
@@ -27,7 +27,7 @@ int8_t read_user_table_valid_flag()
 {
     // KEY_USER_TABLE_VALID
     int8_t value = -1;
-    ESP_ERROR_CHECK(nvs_set_i8(app_nvs_handle, keys_lookup[KEY_USER_TABLE_VALID], &value));
+    ESP_ERROR_CHECK(nvs_set_i8(app_nvs_handle, keys_lookup[KEY_USER_TABLE_VALID], value));
     return value;
 }
 
@@ -41,10 +41,11 @@ void write_user_table_valid_flag(int8_t value)
 int8_t load_user_table()
 {
     // KEY_USER_TABLE_LIST
-    uint8_t buffer[sizeof(SmartSocketUser) * MAX_USER_ENRIES + 1];
-    SmartSocketUser *user = buffer;
-    uint32_t size = sizeof(SmartSocketUser);
-    esp_err_t err = nvs_get_blob(app_nvs_handle, keys_lookup[KEY_USER_TABLE_LIST], buffer, size * MAX_USER_ENRIES);
+    //uint8_t buffer[sizeof(SmartSocketUser) * (MAX_USER_ENRIES + 1)];
+    SmartSocketUser buffer[MAX_USER_ENRIES+1] ={0};
+    SmartSocketUser *user = &buffer[0];
+    size_t size = sizeof(SmartSocketUser)* MAX_USER_ENRIES;
+    esp_err_t err = nvs_get_blob(app_nvs_handle, keys_lookup[KEY_USER_TABLE_LIST], (char*)buffer, &size);
     if (err == ESP_OK)
     {
         for (int i = 0; i < MAX_USER_ENRIES; i++)
@@ -64,7 +65,7 @@ int8_t write_user_table()
     // KEY_USER_TABLE_LIST
 
     uint8_t buffer[sizeof(SmartSocketUser) * MAX_USER_ENRIES + 1];
-    SmartSocketUser *user = buffer;
+    SmartSocketUser *user = (SmartSocketUser *)buffer;
     uint32_t size = sizeof(SmartSocketUser);
     for (int i = 0; i < MAX_USER_ENRIES; i++)
     {
@@ -182,7 +183,8 @@ void retrive_device_info_from_nvs(SmartSocketDevice *dev, char *name)
     ESP_ERROR_CHECK(nvs_get_u64(app_nvs_handle, keys_lookup[KEY_DEV_GID], &dev->group_id));
 
     memset(dev_name, 0, MAX_DEV_NAME);
-    ESP_ERROR_CHECK(nvs_get_str(app_nvs_handle, keys_lookup[KEY_DEV_NAME], dev_name, MAX_DEV_NAME));
+    size_t len = MAX_DEV_NAME;
+    ESP_ERROR_CHECK(nvs_get_str(app_nvs_handle, keys_lookup[KEY_DEV_NAME], dev_name, &len));
     if (name)
     {
         strncpy(name, dev_name, MAX_DEV_NAME);
